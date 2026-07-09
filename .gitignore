@@ -1,0 +1,47 @@
+## Visual Studio / Build Artifacts
+[Bb]in/
+[Oo]bj/
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+
+## VS Code / Rider / JetBrains
+.vscode/
+.idea/
+*.userprefs
+*.csproj.user
+
+## Build Results / Output
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+build/
+PublishOutput/
+
+## SQLite Database files (generated automatically from hotwords_initial.json at startup)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+## NuGet Packages
+**/packages/
+*.nupkg
+project.lock.json
+project.assets.json
+
+## Logs & Temp files
+*.log
+logs/
+temp/
+tmp/
+
+## OS Metadata
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store

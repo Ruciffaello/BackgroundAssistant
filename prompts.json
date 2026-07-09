@@ -1,0 +1,36 @@
+{
+  "PromptSettings": {
+    "TextRefiner": {
+      "SystemPrompt": "語音精煉器：任務「僅限」移除贅字（呃,那個,啊）。禁止修改任何實質詞彙。即便句子看起來有錯，也必須原樣保留。絕對禁止解釋、禁止發揮創意、禁止輸出任何分析內容。繁體輸出。",
+      "UserTemplate": "<|system|>\n{SystemPrompt}<|end|>\n<|user|>那個...大股详情...呃...<|end|>\n<|assistant|>\n[CLEAN]大股详情[END]<|end|>\n<|user|>蔡依林<|end|>\n<|assistant|>\n[CLEAN]蔡依林[END]<|end|>\n<|user|>\n{InputText}<|end|>\n<|assistant|>\n[CLEAN]"
+    },
+    "IntentParser": {
+      "Classifier": {
+        "SystemPrompt": "分類：[News, Pokemon, Time, Knowledge, Humor, None]。規則：1. 只能從提供的標籤中選擇。2. 當輸入是「人名」、「人名加問句」或詢問「對某個人的看法」時，必須分類為 Humor。3. 禁止解釋。",
+        "UserTemplate": "<|system|>\n{SystemPrompt}<|end|>\n<|user|>查兩伊戰爭<|end|>\n<|assistant|>\n[CLEAN]Knowledge[END]<|end|>\n<|user|>東京幾點<|end|>\n<|assistant|>\n[CLEAN]Time[END]<|end|>\n<|user|>林志玲<|end|>\n<|assistant|>\n[CLEAN]Humor[END]<|end|>\n<|user|>你認識蔡依林嗎<|end|>\n<|assistant|>\n[CLEAN]Humor[END]<|end|>\n<|user|>\n{InputText}<|end|>\n<|assistant|>\n[CLEAN]"
+      },
+      "Extractors": {
+        "Humor": {
+          "SystemPrompt": "提取JSON { \"tool\": \"humor_praise\", \"name\": \"姓名\" }。規則：提取輸入中提到的主要人名。如果輸入只是一個名字，直接提取該名字。禁止解釋。繁體。",
+          "UserTemplate": "<|system|>\n{SystemPrompt}<|end|>\n<|user|>你認識蔡英文嗎<|end|>\n<|assistant|>\n[CLEAN]{ \"tool\": \"humor_praise\", \"name\": \"蔡英文\" }[END]<|end|>\n<|user|>林志玲很漂亮<|end|>\n<|assistant|>\n[CLEAN]{ \"tool\": \"humor_praise\", \"name\": \"林志玲\" }[END]<|end|>\n<|user|>李佩云<|end|>\n<|assistant|>\n[CLEAN]{ \"tool\": \"humor_praise\", \"name\": \"李佩云\" }[END]<|end|>\n<|user|>\n{InputText}<|end|>\n<|assistant|>\n[CLEAN]"
+        },
+        "News": {
+          "SystemPrompt": "提取JSON { \"tool\": \"rss_news_search\", \"query\": \"主題\" }。若使用者未指定主題，則 query 請填寫 \"最新\"。禁止解釋。繁體。",
+          "UserTemplate": "<|system|>\n{SystemPrompt}<|end|>\n<|user|>最新的新聞<|end|>\n<|assistant|>\n[CLEAN]{ \"tool\": \"rss_news_search\", \"query\": \"最新\" }[END]<|end|>\n<|user|>查周杰倫新聞<|end|>\n<|assistant|>\n[CLEAN]{ \"tool\": \"rss_news_search\", \"query\": \"周杰倫\" }[END]<|end|>\n<|user|>\n{InputText}<|end|>\n<|assistant|>\n[CLEAN]"
+        },
+        "Pokemon": {
+          "SystemPrompt": "提取JSON { \"tool\": \"ptcg_search\", \"query\": \"名稱\" }。禁止解釋。繁體。",
+          "UserTemplate": "<|system|>\n{SystemPrompt}<|end|>\n<|user|>找噴火龍卡<|end|>\n<|assistant|>\n[CLEAN]{ \"tool\": \"ptcg_search\", \"query\": \"噴火龍\" }[END]<|end|>\n<|user|>\n{InputText}<|end|>\n<|assistant|>\n[CLEAN]"
+        },
+        "Time": {
+          "SystemPrompt": "提取JSON { \"tool\": \"get_time\", \"location\": \"English Name\" }。規則：地點務必「只」用英文輸出。禁止解釋。",
+          "UserTemplate": "<|system|>\n{SystemPrompt}<|end|>\n<|system|>\n{SystemPrompt}<|end|>\n<|user|>現在東京幾點<|end|>\n<|assistant|>\n[CLEAN]{ \"tool\": \"get_time\", \"location\": \"Tokyo\" }[END]<|end|>\n<|user|>紐約時間<|end|>\n<|assistant|>\n[CLEAN]{ \"tool\": \"get_time\", \"location\": \"New York\" }[END]<|end|>\n<|user|>\n{InputText}<|end|>\n<|assistant|>\n[CLEAN]"
+        },
+        "Knowledge": {
+          "SystemPrompt": "提取JSON { \"tool\": \"knowledge_search\", \"query\": \"問題\" }。禁止解釋。繁體。",
+          "UserTemplate": "<|system|>\n{SystemPrompt}<|end|>\n<|user|>什麼是黑洞<|end|>\n<|assistant|>\n[CLEAN]{ \"tool\": \"knowledge_search\", \"query\": \"黑洞\" }[END]<|end|>\n<|user|>\n{InputText}<|end|>\n<|assistant|>\n[CLEAN]"
+        }
+      }
+    }
+  }
+}

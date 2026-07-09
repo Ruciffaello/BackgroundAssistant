@@ -1,0 +1,57 @@
+[
+  {
+    "Keyword": "兩伊戰爭",
+    "ActionJson": "{ \"tool\": \"knowledge_search\", \"query\": \"兩伊戰爭\" }",
+    "Description": "歷史事件快取"
+  },
+  {
+    "Keyword": "台積電",
+    "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"台積電\" }",
+    "Description": "熱門股票新聞"
+  },
+  {
+    "Keyword": "噴火龍",
+    "ActionJson": "{ \"tool\": \"ptcg_search\", \"query\": \"噴火龍\" }",
+    "Description": "寶可夢卡牌搜尋"
+  },
+  {
+    "Keyword": "現在幾點",
+    "ActionJson": "{ \"tool\": \"get_time\", \"location\": \"Local\" }",
+    "Description": "本地時間快速查詢"
+  },
+  {
+    "Keyword": "東京時間",
+    "ActionJson": "{ \"tool\": \"get_time\", \"location\": \"Tokyo\" }",
+    "Description": "東京時間快速查詢"
+  },
+  { "Keyword": "輝達", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"輝達 Nvidia\" }", "Description": "科技財經熱門" },
+  { "Keyword": "蘋果", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"蘋果 Apple\" }", "Description": "科技財經熱門" },
+  { "Keyword": "人工智慧", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"AI 人工智慧\" }", "Description": "科技熱門" },
+  { "Keyword": "比特幣", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"比特幣 Bitcoin\" }", "Description": "加密貨幣" },
+  { "Keyword": "以太幣", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"以太幣 Ethereum\" }", "Description": "加密貨幣" },
+  { "Keyword": "聯發科", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"聯發科\" }", "Description": "台灣財經" },
+  { "Keyword": "鴻海", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"鴻海\" }", "Description": "台灣財經" },
+  { "Keyword": "電動車", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"電動車 EV\" }", "Description": "產業趨勢" },
+  { "Keyword": "美國大選", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"美國大選\" }", "Description": "國際政治" },
+  { "Keyword": "兩岸關係", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"兩岸關係\" }", "Description": "政治新聞" },
+  { "Keyword": "地震", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"地震\" }", "Description": "災害快訊" },
+  { "Keyword": "颱風", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"颱風\" }", "Description": "災害快訊" },
+  { "Keyword": "缺水", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"缺水 水情\" }", "Description": "民生新聞" },
+  { "Keyword": "停電", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"停電 供電\" }", "Description": "民生新聞" },
+  { "Keyword": "房價", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"房價 房市\" }", "Description": "民生經濟" },
+  { "Keyword": "通膨", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"通膨 物價\" }", "Description": "民生經濟" },
+  { "Keyword": "降息", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"Fed 降息\" }", "Description": "國際財經" },
+  { "Keyword": "升息", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"Fed 升息\" }", "Description": "國際財經" },
+  { "Keyword": "台股", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"台股 大盤\" }", "Description": "財經動態" },
+  { "Keyword": "美股", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"美股 道瓊\" }", "Description": "財經動態" },
+  { "Keyword": "奧運", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"奧運\" }", "Description": "體育賽事" },
+  { "Keyword": "大谷翔平", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"大谷翔平\" }", "Description": "體育明星" },
+  { "Keyword": "中職", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"中華職棒\" }", "Description": "體育賽事" },
+  { "Keyword": "周杰倫", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"周杰倫\" }", "Description": "娛樂新聞" },
+  { "Keyword": "五月天", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"五月天\" }", "Description": "娛樂新聞" },
+  { "Keyword": "日幣", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"日幣 匯率\" }", "Description": "匯率旅遊" },
+  { "Keyword": "美金", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"美金 匯率\" }", "Description": "匯率財經" },
+  { "Keyword": "微軟", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"微軟 Microsoft\" }", "Description": "科技熱門" },
+  { "Keyword": "OpenAI", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"OpenAI ChatGPT\" }", "Description": "科技熱門" },
+  { "Keyword": "馬斯克", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"馬斯克 Elon Musk\" }", "Description": "科技熱門" }
+]
