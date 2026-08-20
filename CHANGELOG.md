@@ -4,19 +4,21 @@
 
 ---
 
-## [Unreleased] (規劃中 - 多類型輸入擴充)
+## [v0.4.0] - 2026-08-20
 
-### 規劃目標
-* 支援終端機 (CMD) 文字直接輸入與多輸入來源抽象架構。
+### Added (新增)
+* **多類型輸入基底架構 (`InputWorkerBase`)**：
+  * 建立抽象基底類別 `InputWorkerBase : BackgroundService`，統一封裝狀態檢查、狀態鎖搶佔 (`GlobalState.TryAcquire`)、Log 輸出與通道派發 (`DispatchInputAsync`)。
+* **終端機鍵盤直接輸入 (`ConsoleInputWorker`)**：
+  * 實作 `ConsoleInputWorker`，在背景非同步讀取 CMD 鍵盤輸入，直接寫入 `CleanText` 通道，跳過贅字過濾模型達到秒級極速回應。
+* **輸入源開關配置**：
+  * 在 `appsettings.json` 加入 `InputSources` 設定區塊 (`EnableConsole`, `EnableSpeech`)，可在啟動時自由啟用/停用各輸入管道。
 
-### Planned (預計改動)
-* **Added**:
-  * 建立 InputWorkerBase 抽象基底類別，封裝輸入來源通用行為（狀態檢查、日誌輸出、通道派發 DispatchInputAsync）。
-  * 實作 ConsoleInputWorker，支援在 CMD 終端機直接打字下指令，並直通 CleanText 通道以達秒級回應。
-  * 在 `appsettings.json` 加入 `InputSources` 設定區塊 (`EnableConsole`, `EnableSpeech`)，支援啟動時彈性開啟/關閉指定輸入源。
-* **Refactored**:
-  * 重構 SpeechToTextWorker，繼承 InputWorkerBase 以統一輸入架構。
-  * 優化 GlobalStateService，加入執行緒安全的原子鎖定搶佔機制 (TryAcquire)。
+### Refactored (重構)
+* **語音輸入統一化 (`SpeechToTextWorker`)**：
+  * 改為繼承 `InputWorkerBase`，輸出導向 `RawText` 通道，與鍵盤輸入遵循相同的基底狀態管理。
+* **全域狀態安全鎖定 (`GlobalStateService`)**：
+  * 實作原子性搶佔方法 `TryAcquire()`，避免語音與鍵盤輸入在同一瞬間觸發時產生 Race Condition。
 
 ---
 

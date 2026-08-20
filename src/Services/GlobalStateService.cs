@@ -20,6 +20,19 @@ public class GlobalStateService
     }
 
     /// <summary>
+    /// 嘗試原子性搶佔系統忙碌狀態鎖。若當前為閒置則設為忙碌並回傳 true；若已是忙碌狀態則回傳 false。
+    /// </summary>
+    public bool TryAcquire()
+    {
+        lock (_lock)
+        {
+            if (_isBusy) return false;
+            _isBusy = true;
+            return true;
+        }
+    }
+
+    /// <summary>
     /// 設定系統為忙碌狀態。
     /// </summary>
     public void SetBusy()

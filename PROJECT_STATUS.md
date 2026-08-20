@@ -8,13 +8,13 @@
 ### Pipeline 完整處理流程
 目前專案已實現完整的五階段 Pipeline，並加入快速路徑優化：
 
-1.  **聽取 (Ear - STT)**:
-    *   組件: `SpeechToTextWorker` (SenseVoiceSmall ONNX)
-    *   邏輯: 監聽麥克風 -> VAD 切分 -> 文字過濾 -> **[狀態檢查]**。
-    *   **狀態鎖定**: 若 `GlobalStateService` 為 Busy，則直接丟棄輸入，防止指令堆疊。
+1.  **輸入端 (Input Layer - Multi-Source)**:
+    *   **基底架構**: `InputWorkerBase` 統一管理狀態搶佔 (`GlobalStateService.TryAcquire`) 與通道分派。
+    *   **語音輸入**: `SpeechToTextWorker` (SenseVoiceSmall ONNX) -> 監聽麥克風 -> 寫入 `RawTextChannel`。
+    *   **終端機文字輸入**: `ConsoleInputWorker` -> 讀取 CMD 鍵盤輸入 -> 直通 `CleanTextChannel`。
 2.  **精煉 (Refiner)**:
     *   組件: `TextRefinerWorker` (Phi-3.5 ONNX)
-    *   邏輯: 移除「那個、呃」等贅字。強化提示詞約束，防止模型過度「補完」短句。
+    *   邏輯: 移除語音輸入中的「那個、呃」等贅字。手打文字可繞過此階段。
 3.  **解析 (Brain - Parser)**:
     *   組件: `IntentParserWorker`
     *   **快速路徑 (SQLite Fast Path)**: 優先比對 SQLite 資料庫。支援字面匹配與 **拼音匹配** (解決同音異字)。若命中則跳過 LLM。
@@ -34,6 +34,7 @@
 
 | 階段 | 技術 / 模型 | 功能關鍵點 |
 | :--- | :--- | :--- |
+| **Input** | `InputWorkerBase` | 支援 `ConsoleInputWorker` (CMD) 與 `SpeechToTextWorker` (STT)，由 `appsettings.json` 控制開關。 |
 | **STT** | SenseVoiceSmall | 支援中英日韓，本專案鎖定中文過濾。 |
 | **LLM** | Phi-3.5 (Int4 AWQ) | 共享單例服務，使用 `SemaphoreSlim` 控制資源競爭。 |
 | **TTS** | VITS (Chinese LL) | 支援繁體中文，具備阿拉伯數字轉中文預處理。 |
@@ -44,6 +45,7 @@
 
 ## 3. 關鍵技術亮點
 *   **全本地化推論**: 保護隱私，無雲端 API 成本。
+*   **多來源輸入架構**: 透過 `InputWorkerBase` 解耦輸入管道，手打指令秒級直通，語音指令安全過濾。
 *   **拼音雙重防護**: 
     *   前端：SQLite 拼音比對 (秒回)。
     *   後端：PinyinCorrectionService 針對 AI 提取結果校正。
@@ -57,9 +59,10 @@
 1.  ✅ **指令衝突優化 (已完成)**: 實作狀態鎖定機制。
 2.  ✅ **SQLite 快速搜尋 (已完成)**: 實作拼音感知的熱詞快速路徑。
 3.  ✅ **資料同步機制 (已完成)**: 支援 JSON 批次匯入熱詞。
-4.  **語音喚醒機制 (Wake-word Detection)**: 引入喚醒詞，降低 CPU 常駐開銷。
-5.  **上下文對話記憶 (Contextual Memory)**: 實作對話歷史快取，支援連續追問。
-6.  **第四階段架構升級 (進行中)**: 實作動態插件化 (Reflection)，支援 DLL 擴充工具。
+4.  ✅ **多來源輸入擴充 (已完成)**: 實作 `InputWorkerBase` 與 CMD 文字輸入 `ConsoleInputWorker`。
+5.  **語音喚醒機制 (Wake-word Detection)**: 引入喚醒詞，降低 CPU 常駐開銷。
+6.  **上下文對話記憶 (Contextual Memory)**: 實作對話歷史快取，支援連續追問。
+7.  **第四階段架構升級 (進行中)**: 實作動態插件化 (Reflection)，支援 DLL 擴充工具。
 
 ---
-*最後更新日期：2026年5月28日*
+*最後更新日期：2026年8月20日*

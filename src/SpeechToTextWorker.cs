@@ -1,4 +1,5 @@
-using System.Threading.Channels;
+﻿using System.Threading.Channels;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
@@ -10,13 +11,11 @@ namespace BackgroundAssistant;
 
 /// <summary>
 /// 第一階段：聽取 (Ear) - 語音轉文字工作者。
-/// 負責監聽麥克風，使用 VAD (語音活動偵測) 切分音訊，並透過 SenseVoice 模型將語音轉換為原始文字。
+/// 負責監聽麥克風，使用 VAD (語音活動偵測) 切分音訊，並透過 SenseVoice 模型將語音轉換為原始文字派發至 RawText 通道。
 /// </summary>
-public class SpeechToTextWorker : BackgroundService
+public class SpeechToTextWorker : InputWorkerBase
 {
-    private readonly ILogger<SpeechToTextWorker> _logger;
-    private readonly GlobalStateService _globalState;
-    private readonly ChannelWriter<string> _rawTextWriter;
+    public override string SourceName => "STT";
     
     // 模型路徑 (已更新為官方 SherpaOnnx 模型路徑)
     private const string ModelPath = "D:/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.onnx";
@@ -26,10 +25,8 @@ public class SpeechToTextWorker : BackgroundService
         ILogger<SpeechToTextWorker> logger, 
         GlobalStateService globalState,
         [FromKeyedServices("RawText")] Channel<string> rawTextChannel)
+        : base(logger, globalState, rawTextChannel)
     {
-        _logger = logger;
-        _globalState = globalState;
-        _rawTextWriter = rawTextChannel.Writer;
     }
 
     /// <summary>
@@ -37,12 +34,12 @@ public class SpeechToTextWorker : BackgroundService
     /// </summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("STT Worker (Ear) starting...");
+        Logger.LogInformation("STT Worker (Ear) starting...");
 
         // 檢查模型檔案是否存在 (暫時僅紀錄，避免啟動失敗)
         if (!File.Exists(ModelPath))
         {
-            _logger.LogWarning("Model file not found at {path}. Please update the path later.", ModelPath);
+            Logger.LogWarning("Model file not found at {path}. Please update the path later.", ModelPath);
         }
 
         try
@@ -107,7 +104,7 @@ public class SpeechToTextWorker : BackgroundService
                         var samples = audioBuffer.ToArray();
                         audioBuffer.Clear();
                         isRecording = false;
-                        silenceSamples = 0;
+                        silenceSamples = 0; 
 
                         // 只有當音訊長度大於 0.5 秒才處理 (8000 samples)
                         if (samples.Length > 8000)
@@ -119,7 +116,7 @@ public class SpeechToTextWorker : BackgroundService
             };
 
             waveIn.StartRecording();
-            _logger.LogInformation("Microphone listening with VAD (Threshold: {threshold})...", VolumeThreshold);
+            Logger.LogInformation("Microphone listening with VAD (Threshold: {threshold})...", VolumeThreshold);
 
             try
             {
@@ -129,16 +126,16 @@ public class SpeechToTextWorker : BackgroundService
             finally
             {
                 waveIn.StopRecording();
-                _logger.LogInformation("Microphone stopped.");
+                Logger.LogInformation("Microphone stopped.");
             }
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("STT Worker stopping...");
+            Logger.LogInformation("STT Worker stopping...");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error in STT Worker");
+            Logger.LogError(ex, "Error in STT Worker");
         }
     }
 
@@ -157,7 +154,7 @@ public class SpeechToTextWorker : BackgroundService
             if (string.IsNullOrWhiteSpace(rawText)) return;
 
             // Debug 用：印出原始結果與標籤
-            _logger.LogInformation("[STT Raw]: {raw}", rawText);
+            Logger.LogInformation("[STT Raw]: {raw}", rawText);
 
             // 1. 過濾邏輯優化
             // 如果有標籤，則必須包含 <|zh|>
@@ -171,7 +168,7 @@ public class SpeechToTextWorker : BackgroundService
 
             if (!isChinese)
             {
-                _logger.LogDebug("[STT Skip] Non-Chinese or Noise: {raw}", rawText);
+                Logger.LogDebug("[STT Skip] Non-Chinese or Noise: {raw}", rawText);
                 return;
             }
 
@@ -183,23 +180,13 @@ public class SpeechToTextWorker : BackgroundService
 
             if (!string.IsNullOrWhiteSpace(cleanText) && cleanText.Length >= 2)
             {
-                // 狀態鎖定機制：如果系統正忙於處理或說話，則丟棄新的語音輸入
-                if (_globalState.IsBusy)
-                {
-                    _logger.LogWarning("[STT Lock] System is busy, dropping input: {text}", cleanText);
-                    return;
-                }
-
-                // 開始處理新任務，將系統設為忙碌
-                _globalState.SetBusy();
-                Console.WriteLine($"\n[1. STT Result]: {cleanText}");
-                // 寫入 Pipeline 下一個階段的 Channel
-                await _rawTextWriter.WriteAsync(cleanText, ct);
+                // 透過基底類別統一搶佔狀態與派發至 RawText 通道
+                await DispatchInputAsync(cleanText, ct);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during audio decoding");
+            Logger.LogError(ex, "Error during audio decoding");
         }
     }
 }

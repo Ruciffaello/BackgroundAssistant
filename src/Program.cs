@@ -55,8 +55,22 @@ builder.Services.AddKeyedSingleton("CleanText", cleanTextChannel);
 builder.Services.AddKeyedSingleton("JsonCommand", jsonCommandChannel);
 builder.Services.AddKeyedSingleton("ExecutionResult", executionResultChannel);
 
-// 註冊 Workers
-builder.Services.AddHostedService<SpeechToTextWorker>();
+// 讀取輸入源設定開關 (AOT 友善)
+var inputConfig = builder.Configuration.GetSection("InputSources");
+bool enableSpeech = bool.TryParse(inputConfig["EnableSpeech"], out var es) ? es : true;
+bool enableConsole = bool.TryParse(inputConfig["EnableConsole"], out var ec) ? ec : true;
+
+// 註冊 Workers (依據設定啟用對應輸入源)
+if (enableSpeech)
+{
+    builder.Services.AddHostedService<SpeechToTextWorker>();
+}
+
+if (enableConsole)
+{
+    builder.Services.AddHostedService<ConsoleInputWorker>();
+}
+
 builder.Services.AddHostedService<TextRefinerWorker>();
 builder.Services.AddHostedService<IntentParserWorker>();
 builder.Services.AddHostedService<McpToolExecutor>();
