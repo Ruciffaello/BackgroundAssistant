@@ -35,23 +35,27 @@
 | 階段 | 技術 / 模型 | 功能關鍵點 |
 | :--- | :--- | :--- |
 | **Input** | `InputWorkerBase` | 支援 `ConsoleInputWorker` (CMD) 與 `SpeechToTextWorker` (STT)，由 `appsettings.json` 控制開關。 |
-| **STT** | SenseVoiceSmall | 支援中英日韓，本專案鎖定中文過濾。 |
-| **LLM** | Phi-3.5 (Int4 AWQ) | 共享單例服務，使用 `SemaphoreSlim` 控制資源競爭。 |
-| **TTS** | VITS (Chinese LL) | 支援繁體中文，具備阿拉伯數字轉中文預處理。 |
+| **STT** | SenseVoiceSmall (int8) | 支援中英日韓，鎖定中文過濾；執行緒鎖定 2 以兼顧 4GB 記憶體限制。 |
+| **LLM** | Phi-3.5 (Int4 AWQ) | 共享單例服務，動態計算 Max Length (上限 512) 縮小 KV Cache。 |
+| **TTS** | VITS (Chinese LL) | 支援繁體中文，具備阿拉伯數字轉中文預處理，執行緒鎖定 2。 |
 | **DB** | SQLite (Microsoft.Data.Sqlite) | 存儲熱詞映射，支援自動拼音索引。 |
-| **Config** | JSON (hotwords_initial.json) | 外部化熱詞定義，啟動時自動同步至 DB。 |
+| **Tools** | `IMcpTool` 多元實作 | `TimeTools`, `PtcgTools`, `NewsTools`, `RssNewsTools`, `KnowledgeTools`, `HumorTools`, `SystemTools`。 |
+| **Config** | JSON (`appsettings.json`, `prompts.json`) | 外部化輸入開關、ONNX 設定與提示詞，啟動時自動同步熱詞。 |
 
 ---
 
 ## 3. 關鍵技術亮點
 *   **全本地化推論**: 保護隱私，無雲端 API 成本。
 *   **多來源輸入架構**: 透過 `InputWorkerBase` 解耦輸入管道，手打指令秒級直通，語音指令安全過濾。
+*   **4GB 記憶體極致調優**:
+    *   宿主層：切換為 .NET Workstation GC，立省 150MB~300MB。
+    *   推論層：動態計算 KV Cache 長度，短句推論節省 70%~80% 臨時張量。
 *   **拼音雙重防護**: 
     *   前端：SQLite 拼音比對 (秒回)。
     *   後端：PinyinCorrectionService 針對 AI 提取結果校正。
 *   **RSS 新聞搜尋**: 透過 `RssNewsTools` 對接 Google News，提升中文資訊獲取能力且免 API Key。
-*   **指令衝突控制**: 透過全域狀態鎖，確保「說完一個，才聽下一個」，避免連續返回現象。
-*   **Release 友善設計**: 支援從 `hotwords_initial.json` 自動初始化資料庫，便於分發與部署。
+*   **指令衝突與安全控制**: 透過 `GlobalStateService.TryAcquire` 原子鎖，確保「說完一個，才聽下一個」，避免連續返回現象。
+*   **優雅結束機制**: 支援 CMD 關鍵字 (`exit`/`quit`) 與語音指令 (`system_control`) 安全釋放所有資源並退出。
 
 ---
 
@@ -60,9 +64,10 @@
 2.  ✅ **SQLite 快速搜尋 (已完成)**: 實作拼音感知的熱詞快速路徑。
 3.  ✅ **資料同步機制 (已完成)**: 支援 JSON 批次匯入熱詞。
 4.  ✅ **多來源輸入擴充 (已完成)**: 實作 `InputWorkerBase` 與 CMD 文字輸入 `ConsoleInputWorker`。
-5.  **語音喚醒機制 (Wake-word Detection)**: 引入喚醒詞，降低 CPU 常駐開銷。
-6.  **上下文對話記憶 (Contextual Memory)**: 實作對話歷史快取，支援連續追問。
-7.  **第四階段架構升級 (進行中)**: 實作動態插件化 (Reflection)，支援 DLL 擴充工具。
+5.  ✅ **優雅結束與 4GB 記憶體調優 (已完成)**: 實作 Workstation GC、動態 Max Length 與 `SystemTools`。
+6.  **語音喚醒機制 (Wake-word Detection)**: 引入喚醒詞，降低 CPU 常駐開銷。
+7.  **上下文對話記憶 (Contextual Memory)**: 實作對話歷史快取，支援連續追問。
+8.  **第四階段架構升級 (進行中)**: 實作動態插件化 (Reflection)，支援 DLL 擴充工具。
 
 ---
 *最後更新日期：2026年8月20日*
