@@ -42,6 +42,7 @@ builder.Services.AddSingleton<IMcpTool, NewsTools>();
 builder.Services.AddSingleton<IMcpTool, RssNewsTools>();
 builder.Services.AddSingleton<IMcpTool, KnowledgeTools>();
 builder.Services.AddSingleton<IMcpTool, HumorTools>();
+builder.Services.AddSingleton<IMcpTool, SystemTools>();
 
 // 定義 Pipeline Channels
 var rawTextChannel = Channel.CreateUnbounded<string>();

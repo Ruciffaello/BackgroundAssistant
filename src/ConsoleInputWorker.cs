@@ -1,4 +1,4 @@
-﻿using System.Threading.Channels;
+using System.Threading.Channels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -13,17 +13,21 @@ public class ConsoleInputWorker : InputWorkerBase
 {
     public override string SourceName => "CMD";
 
+    private readonly IHostApplicationLifetime _appLifetime;
+
     public ConsoleInputWorker(
         ILogger<ConsoleInputWorker> logger,
         GlobalStateService globalState,
+        IHostApplicationLifetime appLifetime,
         [FromKeyedServices("CleanText")] Channel<string> cleanTextChannel)
         : base(logger, globalState, cleanTextChannel)
     {
+        _appLifetime = appLifetime;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        Logger.LogInformation("Console Input Worker (CMD) started. You can type commands directly.");
+        Logger.LogInformation("Console Input Worker (CMD) started. You can type commands directly. (Type 'exit' to quit)");
 
         await Task.Run(async () =>
         {
@@ -35,6 +39,23 @@ public class ConsoleInputWorker : InputWorkerBase
                     if (string.IsNullOrWhiteSpace(line)) continue;
 
                     line = line.Trim();
+
+                    // 結束指令判定
+                    if (line.Equals("exit", StringComparison.OrdinalIgnoreCase) ||
+                        line.Equals("quit", StringComparison.OrdinalIgnoreCase) ||
+                        line.Equals("/exit", StringComparison.OrdinalIgnoreCase) ||
+                        line.Equals("/quit", StringComparison.OrdinalIgnoreCase) ||
+                        line.Equals("q", StringComparison.OrdinalIgnoreCase) ||
+                        line == "結束" || line == "再見" || line == "退出")
+                    {
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.WriteLine("\n[系統通知] 收到結束指令，正在優雅關閉 BackgroundAssistant...");
+                        Console.ResetColor();
+
+                        _appLifetime.StopApplication();
+                        break;
+                    }
+
                     bool dispatched = await DispatchInputAsync(line, stoppingToken);
                     if (!dispatched)
                     {

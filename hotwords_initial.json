@@ -53,5 +53,8 @@
   { "Keyword": "美金", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"美金 匯率\" }", "Description": "匯率財經" },
   { "Keyword": "微軟", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"微軟 Microsoft\" }", "Description": "科技熱門" },
   { "Keyword": "OpenAI", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"OpenAI ChatGPT\" }", "Description": "科技熱門" },
-  { "Keyword": "馬斯克", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"馬斯克 Elon Musk\" }", "Description": "科技熱門" }
+  { "Keyword": "馬斯克", "ActionJson": "{ \"tool\": \"rss_news_search\", \"query\": \"馬斯克 Elon Musk\" }", "Description": "科技熱門" },
+  { "Keyword": "關閉系統", "ActionJson": "{ \"tool\": \"system_control\", \"action\": \"shutdown\" }", "Description": "系統關閉" },
+  { "Keyword": "結束程式", "ActionJson": "{ \"tool\": \"system_control\", \"action\": \"shutdown\" }", "Description": "系統關閉" },
+  { "Keyword": "退出系統", "ActionJson": "{ \"tool\": \"system_control\", \"action\": \"shutdown\" }", "Description": "系統關閉" }
 ]

@@ -13,6 +13,10 @@
   * 實作 `ConsoleInputWorker`，在背景非同步讀取 CMD 鍵盤輸入，直接寫入 `CleanText` 通道，跳過贅字過濾模型達到秒級極速回應。
 * **輸入源開關配置**：
   * 在 `appsettings.json` 加入 `InputSources` 設定區塊 (`EnableConsole`, `EnableSpeech`)，可在啟動時自由啟用/停用各輸入管道。
+* **系統優雅結束機制 (Graceful Shutdown)**：
+  * 在 `ConsoleInputWorker` 中加入鍵盤結束指令（支援 `exit`, `quit`, `q`, `結束`, `再見`, `退出`），直接呼叫 `IHostApplicationLifetime.StopApplication()`。
+  * 實作 `SystemTools` (MCP 工具)，支援語音指令「關閉系統 / 結束程式」進行優雅下線並播報道別語音。
+  * 在 `hotwords_initial.json` 中配置系統關閉相關熱詞，支援 SQLite 快搜直接觸發。
 
 ### Refactored (重構)
 * **語音輸入統一化 (`SpeechToTextWorker`)**：
