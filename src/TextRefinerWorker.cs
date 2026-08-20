@@ -61,8 +61,12 @@ public class TextRefinerWorker : BackgroundService
                     using var generatorParams = new GeneratorParams(_modelService.Model);
                     using var sequences = _modelService.Tokenizer.Encode(prompt);
                     
+                    // 動態計算最大長度：輸入 Token 數 + 32 (精煉輸出不會超過原句)，上限 512
+                    int inputTokens = sequences[0].Length;
+                    int dynamicMaxLength = Math.Clamp(inputTokens + 32, 64, 512);
+
                     // 設定推論參數 (Greedy Search 以獲得穩定的結果)
-                    generatorParams.SetSearchOption("max_length", 512);
+                    generatorParams.SetSearchOption("max_length", dynamicMaxLength);
                     generatorParams.SetSearchOption("do_sample", false);
                     generatorParams.SetSearchOption("past_present_share_buffer", true);
 

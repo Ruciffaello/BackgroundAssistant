@@ -23,6 +23,12 @@
   * 改為繼承 `InputWorkerBase`，輸出導向 `RawText` 通道，與鍵盤輸入遵循相同的基底狀態管理。
 * **全域狀態安全鎖定 (`GlobalStateService`)**：
   * 實作原子性搶佔方法 `TryAcquire()`，避免語音與鍵盤輸入在同一瞬間觸發時產生 Race Condition。
+* **ONNX 速度與 4GB 記憶體極致優化**：
+  * 在 `BackgroundAssistant.csproj` 啟用 **Workstation GC** (`ServerGarbageCollection: false`)，顯著降低 .NET 宿主記憶體佔用（立省 150MB~300MB）。
+  * 在 `TextRefinerWorker` 與 `IntentParserWorker` 實作 **動態 Max Length 計算** (`inputTokens + maxNewTokens`)，並設定 512 安全硬上限，兼顧短句極速推論與長字串相容性。
+  * 外部化 `OnnxSettings` 至 `appsettings.json`（包含 STT / TTS 執行緒與推論配置）。
+* **優雅下線例外處理**：
+  * 補全所有 Worker 對 `OperationCanceledException` 的專屬捕捉，避免程式關閉時出現不必要的 `crit:` 致命錯誤日誌。
 
 ---
 

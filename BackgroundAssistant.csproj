@@ -8,6 +8,9 @@
     <!-- 啟用 Native AOT 優化記憶體 -->
     <PublishAot>true</PublishAot>
     <OptimizationPreference>Size</OptimizationPreference>
+    <!-- 啟用 Workstation GC 優先節省記憶體 (針對 4GB 上限環境) -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
   </PropertyGroup>
 
   <ItemGroup>

@@ -69,8 +69,8 @@ public class IntentParserWorker : BackgroundService
                 string classifierUser = _configuration["PromptSettings:IntentParser:Classifier:UserTemplate"] ?? "";
                 string classifierPrompt = classifierUser.Replace("{SystemPrompt}", classifierSys).Replace("{InputText}", text);
                 
-                // 強制分類器也使用 [CLEAN] 標籤約束
-                string category = await RunInferenceAsync(classifierPrompt, "[END]", stoppingToken);
+                // 強制分類器也使用 [CLEAN] 標籤約束 (分類器僅需生成 16 tokens)
+                string category = await RunInferenceAsync(classifierPrompt, "[END]", 16, stoppingToken);
                 
                 // 抓取 [CLEAN] 標籤內的內容
                 var catMatch = System.Text.RegularExpressions.Regex.Match(category, @"\[CLEAN\](.*?)\[END\]", System.Text.RegularExpressions.RegexOptions.Singleline);
@@ -105,7 +105,8 @@ public class IntentParserWorker : BackgroundService
                 {
                     _logger.LogInformation("Step 2: Extracting parameters using {category} extractor...", category);
                     string extractorPrompt = extractorUser.Replace("{SystemPrompt}", extractorSys).Replace("{InputText}", text);
-                    response = await RunInferenceAsync(extractorPrompt, "[END]", stoppingToken);
+                    // 參數提取器預留 96 tokens 用於輸出 JSON
+                    response = await RunInferenceAsync(extractorPrompt, "[END]", 96, stoppingToken);
                 }
                 else
                 {
@@ -146,9 +147,9 @@ public class IntentParserWorker : BackgroundService
     }
 
     /// <summary>
-    /// 封裝 Phi-3.5 推論邏輯。
+    /// 封裝 Phi-3.5 推論邏輯，並根據輸入長度與預期生成長度動態調整 max_length (上限 512)。
     /// </summary>
-    private async Task<string> RunInferenceAsync(string prompt, string stopToken, CancellationToken ct)
+    private async Task<string> RunInferenceAsync(string prompt, string stopToken, int maxNewTokens, CancellationToken ct)
     {
         string result = "";
         try
@@ -158,7 +159,11 @@ public class IntentParserWorker : BackgroundService
             using var generatorParams = new GeneratorParams(_modelService.Model);
             using var sequences = _modelService.Tokenizer.Encode(prompt);
             
-            generatorParams.SetSearchOption("max_length", 512);
+            // 動態計算最大長度：輸入 Token 數 + 預期生成 Token 數，嚴格限制上限在 512
+            int inputTokens = sequences[0].Length;
+            int dynamicMaxLength = Math.Clamp(inputTokens + maxNewTokens, 32, 512);
+
+            generatorParams.SetSearchOption("max_length", dynamicMaxLength);
             generatorParams.SetSearchOption("do_sample", false);
             generatorParams.SetSearchOption("past_present_share_buffer", true);
 
