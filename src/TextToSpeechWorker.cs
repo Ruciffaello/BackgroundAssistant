@@ -119,6 +119,14 @@ public class TextToSpeechWorker : BackgroundService
                 }
             }
         }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("TTS Worker stopping...");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in TTS Worker");
+        }
         finally
         {
             tts?.Dispose();

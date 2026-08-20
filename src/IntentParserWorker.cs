@@ -135,6 +135,10 @@ public class IntentParserWorker : BackgroundService
                 await _jsonCommandWriter.WriteAsync(response, stoppingToken);
             }
         }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Intent Parser Worker stopping...");
+        }
         catch (Exception ex)
         {
             _logger.LogCritical(ex, "FATAL: Intent Parser failed.");
