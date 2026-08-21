@@ -10,7 +10,7 @@
 Input
   -> Decision Router
      |-- answer   -> LLM 直接回答
-     |-- chat     -> 對話回應（個性與使用者記憶待接入）
+     |-- chat     -> 對話回應（使用者記憶下一階段接入）
      |-- support  -> 情緒支持（專門 Safety Evaluator 待接入）
      |-- tool     -> Tool Planner -> McpToolExecutor
      |-- clarify  -> 向使用者追問
@@ -45,6 +45,8 @@ Router 只接受以下 JSON：
 
 `retrieve.source` 目前只允許 `memory` 或 `rag`；其他值會轉為 `clarify`。在 Retrieval Provider 完成前，合法的 `retrieve` 會回覆資料尚未接入，不會形成循環。
 
+使用者 Profile、最近對話與背景記憶的第一版範圍，以[使用者記憶設計（精簡版 V1）](USER_MEMORY_DESIGN.md)為準。現有 Channel 與 `GlobalStateService` 已確保輸入不互相衝突，因此第一版不新增 `TurnId`。
+
 ## Token 預算
 
 模型 Context 上限由 `OnnxSettings:Phi35:MaxContextLimit` 控制，目前為 1024 tokens。
@@ -74,8 +76,8 @@ Router 只接受以下 JSON：
 
 ## 後續工作
 
-- 建立 Memory 與 RAG Provider。
-- 建立 Request Context 與有上限的重新決策循環。
+- 先依精簡版設計接入最近對話與背景 Memory；RAG Provider 延後。
+- 接近 token 上限時才壓縮對話 Context，不建立固定輪數摘要或預先實作重新決策循環。
 - 將工具描述與 JSON Schema 從 Prompt 移到可動態取得的 Tool Registry。
 - 為 Router、Planner 與 Token Budget 增加自動化測試。
 - 將 `IntentParserWorker` 更名為 `DecisionRouterWorker` 或改由 `RequestOrchestrator` 管理。
