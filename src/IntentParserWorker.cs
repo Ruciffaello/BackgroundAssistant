@@ -1,204 +1,358 @@
+using System.Text.Json;
 using System.Threading.Channels;
+using BackgroundAssistant.Services;
+using BackgroundAssistant.Tools;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.ML.OnnxRuntimeGenAI;
-using BackgroundAssistant.Services;
 
 namespace BackgroundAssistant;
 
 /// <summary>
-/// 第三階段：解析 (Parser) - 意圖分析工作者。
-/// 採用「兩階段解析」架構：
-/// 1. 分類器 (Classifier)：判斷使用者意圖大類 (News, Pokemon, Time, Knowledge)。
-/// 2. 提取器 (Extractor)：根據大類別，使用專用 Prompt 提取 JSON 參數。
+/// 決策路由器：判斷輸入應直接回答、檢索資料、使用工具或要求澄清。
+/// RAG 與 Memory Provider 尚未接入；retrieve 目前會安全地要求使用者補充資訊。
 /// </summary>
 public class IntentParserWorker : BackgroundService
 {
+    private const int RouterOutputTokens = 48;
+    private const int ToolPlannerOutputTokens = 96;
+    private const int AnswerOutputTokens = 300;
+    private const int TokenSafetyMargin = 16;
+
     private readonly ILogger<IntentParserWorker> _logger;
     private readonly IConfiguration _configuration;
     private readonly IPhi35ModelService _modelService;
     private readonly PinyinCorrectionService _pinyinService;
-    private readonly SqliteDatabaseService _sqliteService;
+    private readonly HashSet<string> _availableToolNames;
     private readonly ChannelReader<string> _cleanTextReader;
     private readonly ChannelWriter<string> _jsonCommandWriter;
+    private readonly ChannelWriter<string> _answerWriter;
+    private readonly int _contextLimit;
 
     public IntentParserWorker(
-        ILogger<IntentParserWorker> logger, 
+        ILogger<IntentParserWorker> logger,
         IConfiguration configuration,
         IPhi35ModelService modelService,
         PinyinCorrectionService pinyinService,
-        SqliteDatabaseService sqliteService,
-        [FromKeyedServices("CleanText")] Channel<string> cleanTextChannel, 
-        [FromKeyedServices("JsonCommand")] Channel<string> jsonCommandChannel)
+        IEnumerable<IMcpTool> tools,
+        [FromKeyedServices("CleanText")] Channel<string> cleanTextChannel,
+        [FromKeyedServices("JsonCommand")] Channel<string> jsonCommandChannel,
+        [FromKeyedServices("ExecutionResult")] Channel<string> executionResultChannel)
     {
         _logger = logger;
         _configuration = configuration;
         _modelService = modelService;
         _pinyinService = pinyinService;
-        _sqliteService = sqliteService;
+        _availableToolNames = tools.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
         _cleanTextReader = cleanTextChannel.Reader;
         _jsonCommandWriter = jsonCommandChannel.Writer;
+        _answerWriter = executionResultChannel.Writer;
+        _contextLimit = int.TryParse(configuration["OnnxSettings:Phi35:MaxContextLimit"], out int limit)
+            ? limit
+            : 512;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Intent Parser Worker starting (Two-Stage + SQLite Fast Path Enabled)...");
+        _logger.LogInformation("Decision Router starting with a {limit}-token context limit...", _contextLimit);
 
         try
         {
-            await foreach (var text in _cleanTextReader.ReadAllAsync(stoppingToken))
+            await foreach (string text in _cleanTextReader.ReadAllAsync(stoppingToken))
             {
                 if (string.IsNullOrWhiteSpace(text)) continue;
 
-                // --- 快速路徑：SQLite 關鍵字比對 ---
-                _logger.LogInformation("Checking SQLite Fast Path for: {text}", text);
-                string? fastPathResult = _sqliteService.GetActionByKeyword(text);
-                
-                if (fastPathResult != null)
-                {
-                    _logger.LogInformation("SQLite Match Found! Bypassing LLM inference.");
-                    Console.WriteLine($"\n[3. Intent Parser (SQLite Fast Path)]: {fastPathResult}");
-                    await _jsonCommandWriter.WriteAsync(fastPathResult, stoppingToken);
-                    continue;
-                }
+                RouterDecision decision = await DecideAsync(text, stoppingToken);
+                _logger.LogInformation("Router decision for '{text}': {action}", text, decision.Action);
 
-                _logger.LogInformation("No SQLite match. Step 1: Classifying intent for: {text}", text);
-
-                // --- 第一階段：分類 ---
-                string classifierSys = _configuration["PromptSettings:IntentParser:Classifier:SystemPrompt"] ?? "";
-                string classifierUser = _configuration["PromptSettings:IntentParser:Classifier:UserTemplate"] ?? "";
-                string classifierPrompt = classifierUser.Replace("{SystemPrompt}", classifierSys).Replace("{InputText}", text);
-                
-                // 強制分類器也使用 [CLEAN] 標籤約束 (分類器僅需生成 16 tokens)
-                string category = await RunInferenceAsync(classifierPrompt, "[END]", 16, stoppingToken);
-                
-                // 抓取 [CLEAN] 標籤內的內容
-                var catMatch = System.Text.RegularExpressions.Regex.Match(category, @"\[CLEAN\](.*?)\[END\]", System.Text.RegularExpressions.RegexOptions.Singleline);
-                if (catMatch.Success)
+                switch (decision.Action)
                 {
-                    category = catMatch.Groups[1].Value.Trim();
-                }
-                else
-                {
-                    // Fallback: 移除所有標籤後取第一行
-                    category = category.Replace("[CLEAN]", "").Replace("[END]", "").Trim().Split('\n')[0];
-                }
+                    case "answer":
+                        await WriteResponseAsync(text, "DirectAnswer", "Direct Answer", stoppingToken);
+                        break;
 
-                _logger.LogInformation("Detected Category: {category}", category);
+                    case "chat":
+                        await WriteResponseAsync(text, "ChatAnswer", "Chat", stoppingToken);
+                        break;
 
-                // --- 第二階段：提取 ---
-                string response = "無法執行";
+                    case "support":
+                        await WriteResponseAsync(text, "SupportAnswer", "Emotional Support", stoppingToken);
+                        break;
 
-                // 方案 C 保險機制：如果分類為 None，但文字長度符合中文姓名特徵 (2-5字)，強制嘗試 Humor 提取
-                if (category == "None" && text.Length >= 2 && text.Length <= 5)
-                {
-                    _logger.LogInformation("Fallback: Input '{text}' looks like a name. Forcing Humor extraction.", text);
-                    category = "Humor";
-                }
-                
-                // 檢查該類別是否有對應的 Extractor
-                string extractorPath = $"PromptSettings:IntentParser:Extractors:{category}";
-                string extractorSys = _configuration[$"{extractorPath}:SystemPrompt"] ?? "";
-                string extractorUser = _configuration[$"{extractorPath}:UserTemplate"] ?? "";
+                    case "tool":
+                        await PlanToolAsync(text, stoppingToken);
+                        break;
 
-                if (!string.IsNullOrEmpty(extractorSys))
-                {
-                    _logger.LogInformation("Step 2: Extracting parameters using {category} extractor...", category);
-                    string extractorPrompt = extractorUser.Replace("{SystemPrompt}", extractorSys).Replace("{InputText}", text);
-                    // 參數提取器預留 96 tokens 用於輸出 JSON
-                    response = await RunInferenceAsync(extractorPrompt, "[END]", 96, stoppingToken);
-                }
-                else
-                {
-                    _logger.LogWarning("No extractor found for category: {category}", category);
-                    response = "無法執行";
-                }
+                    case "clarify":
+                        await _answerWriter.WriteAsync(
+                            string.IsNullOrWhiteSpace(decision.Question)
+                                ? "請再多提供一些資訊，讓我知道你希望我做什麼。"
+                                : decision.Question,
+                            stoppingToken);
+                        break;
 
-                // --- 後處理：JSON 抓取與拼音校正 ---
-                // 使用非貪婪模式 \{.*?\} 確保只抓取第一組 JSON，避免模型碎碎念
-                var match = System.Text.RegularExpressions.Regex.Match(response, @"\{.*?\}", System.Text.RegularExpressions.RegexOptions.Singleline);
-                if (match.Success)
-                {
-                    response = match.Value;
-                    string correctedResponse = _pinyinService.CorrectJsonValues(response);
-                    if (correctedResponse != response)
-                    {
-                        _logger.LogInformation("Pinyin Post-Correction applied: {old} -> {new}", response, correctedResponse);
-                        response = correctedResponse;
-                    }
-                }
-                else
-                {
-                    response = "無法執行";
-                }
+                    case "retrieve":
+                        _logger.LogInformation(
+                            "Retrieval requested for source {source}, but no Memory/RAG provider is registered yet.",
+                            decision.Source);
+                        await _answerWriter.WriteAsync(
+                            "我目前還沒有可用的記憶或知識庫資料，請再提供一些相關資訊。",
+                            stoppingToken);
+                        break;
 
-                Console.WriteLine($"\n[3. Intent Parser Result]:\n----------------------\n{response}\n----------------------");
-                await _jsonCommandWriter.WriteAsync(response, stoppingToken);
+                    default:
+                        _logger.LogWarning("Unknown router action: {action}", decision.Action);
+                        await _answerWriter.WriteAsync("請再說明你希望我回答或執行的內容。", stoppingToken);
+                        break;
+                }
             }
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("Intent Parser Worker stopping...");
+            _logger.LogInformation("Decision Router stopping...");
         }
         catch (Exception ex)
         {
-            _logger.LogCritical(ex, "FATAL: Intent Parser failed.");
+            _logger.LogCritical(ex, "FATAL: Decision Router failed.");
         }
     }
 
-    /// <summary>
-    /// 封裝 Phi-3.5 推論邏輯，並根據輸入長度與預期生成長度動態調整 max_length (上限 512)。
-    /// </summary>
-    private async Task<string> RunInferenceAsync(string prompt, string stopToken, int maxNewTokens, CancellationToken ct)
+    private async Task<RouterDecision> DecideAsync(string text, CancellationToken ct)
     {
-        string result = "";
+        string systemPrompt = _configuration["PromptSettings:DecisionRouter:SystemPrompt"] ?? "";
+        string userTemplate = _configuration["PromptSettings:DecisionRouter:UserTemplate"] ?? "";
+        string prompt = BuildPromptWithinBudget(systemPrompt, userTemplate, text, RouterOutputTokens);
+        string response = await RunInferenceAsync(prompt, RouterOutputTokens, ct);
+
+        if (!TryExtractJson(response, out JsonDocument document))
+        {
+            _logger.LogWarning("Router returned invalid JSON: {response}", response);
+            return new RouterDecision("clarify", "請再說明你希望我做什麼。", null, null);
+        }
+
+        using (document)
+        {
+            JsonElement root = document.RootElement;
+            string action = root.TryGetProperty("action", out JsonElement actionElement)
+                ? actionElement.GetString()?.Trim().ToLowerInvariant() ?? ""
+                : "";
+            string? question = root.TryGetProperty("question", out JsonElement questionElement)
+                ? questionElement.GetString()
+                : null;
+            string? source = root.TryGetProperty("source", out JsonElement sourceElement)
+                ? sourceElement.GetString()
+                : null;
+            string? query = root.TryGetProperty("query", out JsonElement queryElement)
+                ? queryElement.GetString()
+                : null;
+
+            if (action == "retrieve" && source is not ("memory" or "rag"))
+            {
+                _logger.LogWarning("Router requested unsupported retrieval source: {source}", source);
+                return new RouterDecision(
+                    "clarify",
+                    string.IsNullOrWhiteSpace(question) ? "你想查詢什麼內容？" : question,
+                    null,
+                    null);
+            }
+
+            return action is "answer" or "chat" or "support" or "retrieve" or "tool" or "clarify"
+                ? new RouterDecision(action, question, source, query)
+                : new RouterDecision("clarify", "請再說明你希望我做什麼。", null, null);
+        }
+    }
+
+    private async Task WriteResponseAsync(
+        string text,
+        string promptSection,
+        string outputLabel,
+        CancellationToken ct)
+    {
+        string systemPrompt = _configuration[$"PromptSettings:{promptSection}:SystemPrompt"] ?? "";
+        string userTemplate = _configuration[$"PromptSettings:{promptSection}:UserTemplate"] ?? "";
+        string prompt = BuildPromptWithinBudget(systemPrompt, userTemplate, text, AnswerOutputTokens);
+        string answer = CleanModelText(await RunInferenceAsync(prompt, AnswerOutputTokens, ct));
+
+        if (string.IsNullOrWhiteSpace(answer))
+        {
+            answer = "抱歉，我目前無法產生回答。";
+        }
+
+        Console.WriteLine($"\n[3. {outputLabel}]: {answer}");
+        await _answerWriter.WriteAsync(answer, ct);
+    }
+
+    private async Task PlanToolAsync(string text, CancellationToken ct)
+    {
+        string systemPrompt = _configuration["PromptSettings:ToolPlanner:SystemPrompt"] ?? "";
+        string userTemplate = _configuration["PromptSettings:ToolPlanner:UserTemplate"] ?? "";
+        string prompt = BuildPromptWithinBudget(systemPrompt, userTemplate, text, ToolPlannerOutputTokens);
+        string response = await RunInferenceAsync(prompt, ToolPlannerOutputTokens, ct);
+
+        if (!TryExtractJson(response, out JsonDocument document))
+        {
+            _logger.LogWarning("Tool Planner returned invalid JSON: {response}", response);
+            await _answerWriter.WriteAsync("我知道這需要使用工具，但目前無法建立有效的工具指令。", ct);
+            return;
+        }
+
+        string commandJson;
+        using (document)
+        {
+            JsonElement root = document.RootElement;
+            string toolName = root.TryGetProperty("tool", out JsonElement toolElement)
+                ? toolElement.GetString() ?? ""
+                : "";
+
+            if (!_availableToolNames.Contains(toolName))
+            {
+                _logger.LogWarning("Tool Planner selected unavailable tool: {tool}", toolName);
+                await _answerWriter.WriteAsync("目前沒有可執行這項要求的工具。", ct);
+                return;
+            }
+
+            commandJson = root.GetRawText();
+        }
+
+        commandJson = _pinyinService.CorrectJsonValues(commandJson);
+        Console.WriteLine($"\n[3. Tool Plan]: {commandJson}");
+        await _jsonCommandWriter.WriteAsync(commandJson, ct);
+    }
+
+    private string BuildPromptWithinBudget(
+        string systemPrompt,
+        string userTemplate,
+        string inputText,
+        int reservedOutputTokens)
+    {
+        int maxInputTokens = _contextLimit - reservedOutputTokens - TokenSafetyMargin;
+        string candidateInput = inputText.Trim();
+
+        while (true)
+        {
+            string prompt = userTemplate
+                .Replace("{SystemPrompt}", systemPrompt)
+                .Replace("{InputText}", candidateInput);
+
+            using var sequences = _modelService.Tokenizer.Encode(prompt);
+            if (sequences[0].Length <= maxInputTokens)
+            {
+                if (candidateInput.Length < inputText.Trim().Length)
+                {
+                    _logger.LogWarning(
+                        "Input was shortened to fit the {limit}-token context budget.",
+                        _contextLimit);
+                }
+
+                return prompt;
+            }
+
+            if (candidateInput.Length <= 16)
+            {
+                throw new InvalidOperationException(
+                    $"Prompt template exceeds the {_contextLimit}-token context budget.");
+            }
+
+            candidateInput = candidateInput[..Math.Max(16, candidateInput.Length * 3 / 4)].TrimEnd();
+        }
+    }
+
+    private async Task<string> RunInferenceAsync(
+        string prompt,
+        int reservedOutputTokens,
+        CancellationToken ct)
+    {
+        bool lockTaken = false;
         try
         {
             await _modelService.Lock.WaitAsync(ct);
+            lockTaken = true;
 
             using var generatorParams = new GeneratorParams(_modelService.Model);
             using var sequences = _modelService.Tokenizer.Encode(prompt);
-            
-            // 動態計算最大長度：輸入 Token 數 + 預期生成 Token 數，嚴格限制上限在 512
             int inputTokens = sequences[0].Length;
-            int dynamicMaxLength = Math.Clamp(inputTokens + maxNewTokens, 32, 512);
+            int maxLength = Math.Min(inputTokens + reservedOutputTokens, _contextLimit);
 
-            generatorParams.SetSearchOption("max_length", dynamicMaxLength);
+            generatorParams.SetSearchOption("max_length", maxLength);
             generatorParams.SetSearchOption("do_sample", false);
             generatorParams.SetSearchOption("past_present_share_buffer", true);
 
             using var generator = new Generator(_modelService.Model, generatorParams);
             generator.AppendTokenSequences(sequences);
-
             using var tokenizerStream = _modelService.Tokenizer.CreateStream();
 
+            string result = "";
             while (!generator.IsDone() && !ct.IsCancellationRequested)
             {
                 generator.GenerateNextToken();
-                var lastTokenId = generator.GetSequence(0)[^1];
-                var part = tokenizerStream.Decode(lastTokenId);
-                
+                int lastTokenId = generator.GetSequence(0)[^1];
+                string part = tokenizerStream.Decode(lastTokenId);
+
                 if (!string.IsNullOrEmpty(part))
                 {
                     result += part;
-                    // 偵測到 stopToken 立即切斷
-                    if (result.Contains(stopToken)) 
+                    int endIndex = result.IndexOf("[END]", StringComparison.Ordinal);
+                    if (endIndex >= 0)
                     {
-                        result = result.Substring(0, result.IndexOf(stopToken));
-                        break;
+                        return result[..endIndex];
                     }
                 }
             }
+
+            return result;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Inference sub-call failed.");
             return "";
         }
         finally
         {
-            _modelService.Lock.Release();
+            if (lockTaken)
+            {
+                _modelService.Lock.Release();
+            }
         }
-        return result;
     }
+
+    private static bool TryExtractJson(string text, out JsonDocument document)
+    {
+        document = null!;
+        int start = text.IndexOf('{');
+        int end = text.LastIndexOf('}');
+        if (start < 0 || end <= start) return false;
+
+        try
+        {
+            document = JsonDocument.Parse(text[start..(end + 1)]);
+            if (document.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                return true;
+            }
+
+            document.Dispose();
+            document = null!;
+            return false;
+        }
+        catch (JsonException)
+        {
+            document = null!;
+            return false;
+        }
+    }
+
+    private static string CleanModelText(string text)
+    {
+        return text
+            .Replace("[CLEAN]", "", StringComparison.Ordinal)
+            .Replace("[END]", "", StringComparison.Ordinal)
+            .Replace("<|end|>", "", StringComparison.Ordinal)
+            .Trim();
+    }
+
+    private sealed record RouterDecision(
+        string Action,
+        string? Question,
+        string? Source,
+        string? Query);
 }
