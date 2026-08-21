@@ -2,6 +2,7 @@ using System.Threading.Channels;
 using BackgroundAssistant;
 using BackgroundAssistant.Tools;
 using BackgroundAssistant.Services;
+using Microsoft.ML.OnnxRuntimeGenAI;
 
 // 設定全域 UTF8 編碼，防止亂碼
 Console.OutputEncoding = System.Text.Encoding.UTF8;
@@ -78,7 +79,8 @@ builder.Services.AddHostedService<McpToolExecutor>();
 builder.Services.AddHostedService<TextToSpeechWorker>();
 builder.Services.AddHostedService<Worker>();
 
-var host = builder.Build();
+using var ogaHandle = new OgaHandle();
+using var host = builder.Build();
 
 // 強制初始化 SQLite 資料庫服務
 using (var scope = host.Services.CreateScope())
