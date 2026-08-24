@@ -1,7 +1,9 @@
 using System.Text.Json;
 using System.Threading.Channels;
+using System.Globalization;
 using BackgroundAssistant.Services;
 using BackgroundAssistant.Tools;
+using BackgroundAssistant.Memory;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.ML.OnnxRuntimeGenAI;
@@ -9,13 +11,11 @@ using Microsoft.ML.OnnxRuntimeGenAI;
 namespace BackgroundAssistant;
 
 /// <summary>
-/// 決策路由器：判斷輸入應直接回答、檢索資料、使用工具或要求澄清。
-/// RAG 與 Memory Provider 尚未接入；retrieve 目前會安全地要求使用者補充資訊。
+/// 對話／工具路由器：一般輸入直接對話，只有明確工具需求才產生工具命令。
 /// </summary>
 public class IntentParserWorker : BackgroundService
 {
-    private const int RouterOutputTokens = 48;
-    private const int ToolPlannerOutputTokens = 96;
+    private const int RouterOutputTokens = 96;
     private const int AnswerOutputTokens = 300;
     private const int TokenSafetyMargin = 16;
 
@@ -27,13 +27,16 @@ public class IntentParserWorker : BackgroundService
     private readonly ChannelReader<string> _cleanTextReader;
     private readonly ChannelWriter<string> _jsonCommandWriter;
     private readonly ChannelWriter<string> _answerWriter;
+    private readonly RecentConversationService _recentConversation;
     private readonly int _contextLimit;
+    private readonly double _answerRepetitionPenalty;
 
     public IntentParserWorker(
         ILogger<IntentParserWorker> logger,
         IConfiguration configuration,
         IPhi35ModelService modelService,
         PinyinCorrectionService pinyinService,
+        RecentConversationService recentConversation,
         IEnumerable<IMcpTool> tools,
         [FromKeyedServices("CleanText")] Channel<string> cleanTextChannel,
         [FromKeyedServices("JsonCommand")] Channel<string> jsonCommandChannel,
@@ -43,6 +46,7 @@ public class IntentParserWorker : BackgroundService
         _configuration = configuration;
         _modelService = modelService;
         _pinyinService = pinyinService;
+        _recentConversation = recentConversation;
         _availableToolNames = tools.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
         _cleanTextReader = cleanTextChannel.Reader;
         _jsonCommandWriter = jsonCommandChannel.Writer;
@@ -50,6 +54,12 @@ public class IntentParserWorker : BackgroundService
         _contextLimit = int.TryParse(configuration["OnnxSettings:Phi35:MaxContextLimit"], out int limit)
             ? limit
             : 512;
+        _answerRepetitionPenalty = double.TryParse(
+            configuration["OnnxSettings:Phi35:AnswerRepetitionPenalty"],
+            CultureInfo.InvariantCulture,
+            out double repetitionPenalty)
+            ? Math.Max(1d, repetitionPenalty)
+            : 1.1d;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -62,47 +72,29 @@ public class IntentParserWorker : BackgroundService
             {
                 if (string.IsNullOrWhiteSpace(text)) continue;
 
+                string contextualInput = AddRecentContext(text, _recentConversation.BuildPromptContext(text));
+                _recentConversation.BeginTurn(text);
+
                 RouterDecision decision = await DecideAsync(text, stoppingToken);
-                _logger.LogInformation("Router decision for '{text}': {action}", text, decision.Action);
+                _logger.LogInformation(
+                    "Router decision for '{text}': {mode}, subject: {subject}",
+                    text,
+                    decision.Mode,
+                    decision.Subject);
 
-                switch (decision.Action)
+                switch (decision.Mode)
                 {
-                    case "answer":
-                        await WriteResponseAsync(text, "DirectAnswer", "Direct Answer", stoppingToken);
-                        break;
-
-                    case "chat":
-                        await WriteResponseAsync(text, "ChatAnswer", "Chat", stoppingToken);
-                        break;
-
-                    case "support":
-                        await WriteResponseAsync(text, "SupportAnswer", "Emotional Support", stoppingToken);
+                    case "conversation":
+                        await WriteResponseAsync(contextualInput, "ChatAnswer", "Chat", stoppingToken);
                         break;
 
                     case "tool":
-                        await PlanToolAsync(text, stoppingToken);
-                        break;
-
-                    case "clarify":
-                        await _answerWriter.WriteAsync(
-                            string.IsNullOrWhiteSpace(decision.Question)
-                                ? "請再多提供一些資訊，讓我知道你希望我做什麼。"
-                                : decision.Question,
-                            stoppingToken);
-                        break;
-
-                    case "retrieve":
-                        _logger.LogInformation(
-                            "Retrieval requested for source {source}, but no Memory/RAG provider is registered yet.",
-                            decision.Source);
-                        await _answerWriter.WriteAsync(
-                            "我目前還沒有可用的記憶或知識庫資料，請再提供一些相關資訊。",
-                            stoppingToken);
+                        await DispatchToolAsync(decision, stoppingToken);
                         break;
 
                     default:
-                        _logger.LogWarning("Unknown router action: {action}", decision.Action);
-                        await _answerWriter.WriteAsync("請再說明你希望我回答或執行的內容。", stoppingToken);
+                        _logger.LogWarning("Unknown router mode: {mode}; falling back to conversation.", decision.Mode);
+                        await WriteResponseAsync(contextualInput, "ChatAnswer", "Chat", stoppingToken);
                         break;
                 }
             }
@@ -124,41 +116,41 @@ public class IntentParserWorker : BackgroundService
         string prompt = BuildPromptWithinBudget(systemPrompt, userTemplate, text, RouterOutputTokens);
         string response = await RunInferenceAsync(prompt, RouterOutputTokens, ct);
 
+        Console.WriteLine($"\n[3. Decision Router]:\n{response.Trim()}");
+
         if (!TryExtractJson(response, out JsonDocument document))
         {
             _logger.LogWarning("Router returned invalid JSON: {response}", response);
-            return new RouterDecision("clarify", "請再說明你希望我做什麼。", null, null);
+            return RouterDecision.Conversation();
         }
 
         using (document)
         {
             JsonElement root = document.RootElement;
-            string action = root.TryGetProperty("action", out JsonElement actionElement)
-                ? actionElement.GetString()?.Trim().ToLowerInvariant() ?? ""
+            string mode = root.TryGetProperty("mode", out JsonElement modeElement)
+                ? modeElement.GetString()?.Trim().ToLowerInvariant() ?? ""
                 : "";
-            string? question = root.TryGetProperty("question", out JsonElement questionElement)
-                ? questionElement.GetString()
-                : null;
-            string? source = root.TryGetProperty("source", out JsonElement sourceElement)
-                ? sourceElement.GetString()
-                : null;
-            string? query = root.TryGetProperty("query", out JsonElement queryElement)
-                ? queryElement.GetString()
+            string subject = root.TryGetProperty("subject", out JsonElement subjectElement)
+                ? subjectElement.GetString()?.Trim() ?? "unknown"
+                : "unknown";
+            string? tool = root.TryGetProperty("tool", out JsonElement toolElement)
+                ? toolElement.GetString()?.Trim()
                 : null;
 
-            if (action == "retrieve" && source is not ("memory" or "rag"))
+            if (mode != "tool")
             {
-                _logger.LogWarning("Router requested unsupported retrieval source: {source}", source);
-                return new RouterDecision(
-                    "clarify",
-                    string.IsNullOrWhiteSpace(question) ? "你想查詢什麼內容？" : question,
-                    null,
-                    null);
+                return new RouterDecision("conversation", subject, null, null);
             }
 
-            return action is "answer" or "chat" or "support" or "retrieve" or "tool" or "clarify"
-                ? new RouterDecision(action, question, source, query)
-                : new RouterDecision("clarify", "請再說明你希望我做什麼。", null, null);
+            if (string.IsNullOrWhiteSpace(tool) || !_availableToolNames.Contains(tool))
+            {
+                _logger.LogWarning(
+                    "Router selected an unavailable or missing tool: {tool}; falling back to conversation.",
+                    tool);
+                return RouterDecision.Conversation(subject);
+            }
+
+            return new RouterDecision("tool", subject, tool, root.GetRawText());
         }
     }
 
@@ -171,7 +163,11 @@ public class IntentParserWorker : BackgroundService
         string systemPrompt = _configuration[$"PromptSettings:{promptSection}:SystemPrompt"] ?? "";
         string userTemplate = _configuration[$"PromptSettings:{promptSection}:UserTemplate"] ?? "";
         string prompt = BuildPromptWithinBudget(systemPrompt, userTemplate, text, AnswerOutputTokens);
-        string answer = CleanModelText(await RunInferenceAsync(prompt, AnswerOutputTokens, ct));
+        string answer = CleanModelText(await RunInferenceAsync(
+            prompt,
+            AnswerOutputTokens,
+            ct,
+            _answerRepetitionPenalty));
 
         if (string.IsNullOrWhiteSpace(answer))
         {
@@ -179,44 +175,36 @@ public class IntentParserWorker : BackgroundService
         }
 
         Console.WriteLine($"\n[3. {outputLabel}]: {answer}");
-        await _answerWriter.WriteAsync(answer, ct);
+        await WriteFinalTextAsync(answer, ct);
     }
 
-    private async Task PlanToolAsync(string text, CancellationToken ct)
+    private async Task DispatchToolAsync(RouterDecision decision, CancellationToken ct)
     {
-        string systemPrompt = _configuration["PromptSettings:ToolPlanner:SystemPrompt"] ?? "";
-        string userTemplate = _configuration["PromptSettings:ToolPlanner:UserTemplate"] ?? "";
-        string prompt = BuildPromptWithinBudget(systemPrompt, userTemplate, text, ToolPlannerOutputTokens);
-        string response = await RunInferenceAsync(prompt, ToolPlannerOutputTokens, ct);
-
-        if (!TryExtractJson(response, out JsonDocument document))
+        if (string.IsNullOrWhiteSpace(decision.CommandJson) ||
+            string.IsNullOrWhiteSpace(decision.Tool) ||
+            !_availableToolNames.Contains(decision.Tool))
         {
-            _logger.LogWarning("Tool Planner returned invalid JSON: {response}", response);
-            await _answerWriter.WriteAsync("我知道這需要使用工具，但目前無法建立有效的工具指令。", ct);
+            _logger.LogWarning("Router produced an invalid tool command.");
+            await WriteFinalTextAsync("目前無法建立有效的工具指令。", ct);
             return;
         }
 
-        string commandJson;
-        using (document)
-        {
-            JsonElement root = document.RootElement;
-            string toolName = root.TryGetProperty("tool", out JsonElement toolElement)
-                ? toolElement.GetString() ?? ""
-                : "";
-
-            if (!_availableToolNames.Contains(toolName))
-            {
-                _logger.LogWarning("Tool Planner selected unavailable tool: {tool}", toolName);
-                await _answerWriter.WriteAsync("目前沒有可執行這項要求的工具。", ct);
-                return;
-            }
-
-            commandJson = root.GetRawText();
-        }
-
-        commandJson = _pinyinService.CorrectJsonValues(commandJson);
-        Console.WriteLine($"\n[3. Tool Plan]: {commandJson}");
+        string commandJson = _pinyinService.CorrectJsonValues(decision.CommandJson);
+        Console.WriteLine($"\n[3. Tool Command]: {commandJson}");
         await _jsonCommandWriter.WriteAsync(commandJson, ct);
+    }
+
+    private async Task WriteFinalTextAsync(string text, CancellationToken ct)
+    {
+        await _answerWriter.WriteAsync(text, ct);
+        _recentConversation.CompleteTurn(text);
+    }
+
+    private static string AddRecentContext(string currentInput, string recentContext)
+    {
+        return string.IsNullOrWhiteSpace(recentContext)
+            ? currentInput
+            : $"以下是先前對話，只用來理解上下文：\n{recentContext}\n\n目前使用者輸入（請以這句為主）：\n{currentInput}";
     }
 
     private string BuildPromptWithinBudget(
@@ -260,7 +248,8 @@ public class IntentParserWorker : BackgroundService
     private async Task<string> RunInferenceAsync(
         string prompt,
         int reservedOutputTokens,
-        CancellationToken ct)
+        CancellationToken ct,
+        double repetitionPenalty = 1d)
     {
         bool lockTaken = false;
         try
@@ -275,6 +264,7 @@ public class IntentParserWorker : BackgroundService
 
             generatorParams.SetSearchOption("max_length", maxLength);
             generatorParams.SetSearchOption("do_sample", false);
+            generatorParams.SetSearchOption("repetition_penalty", repetitionPenalty);
             generatorParams.SetSearchOption("past_present_share_buffer", true);
 
             using var generator = new Generator(_modelService.Model, generatorParams);
@@ -291,6 +281,11 @@ public class IntentParserWorker : BackgroundService
                 if (!string.IsNullOrEmpty(part))
                 {
                     result += part;
+                    if (repetitionPenalty > 1d && TryTrimRepeatedSuffix(result, out string trimmedResult))
+                    {
+                        _logger.LogWarning("Answer generation stopped after detecting a repeated suffix.");
+                        return trimmedResult;
+                    }
                     int endIndex = result.IndexOf("[END]", StringComparison.Ordinal);
                     if (endIndex >= 0)
                     {
@@ -350,9 +345,44 @@ public class IntentParserWorker : BackgroundService
             .Trim();
     }
 
+    private static bool TryTrimRepeatedSuffix(string text, out string trimmed)
+    {
+        const int repetitions = 4;
+        trimmed = text;
+        if (text.Length < 24) return false;
+
+        for (int phraseLength = 2; phraseLength <= 24; phraseLength++)
+        {
+            int repeatedLength = phraseLength * repetitions;
+            if (repeatedLength > text.Length) break;
+
+            string phrase = text[^phraseLength..];
+            bool repeated = true;
+            for (int index = 2; index <= repetitions; index++)
+            {
+                int start = text.Length - phraseLength * index;
+                if (!text.AsSpan(start, phraseLength).SequenceEqual(phrase))
+                {
+                    repeated = false;
+                    break;
+                }
+            }
+
+            if (!repeated) continue;
+            trimmed = text[..(text.Length - repeatedLength + phraseLength)].TrimEnd();
+            return true;
+        }
+
+        return false;
+    }
+
     private sealed record RouterDecision(
-        string Action,
-        string? Question,
-        string? Source,
-        string? Query);
+        string Mode,
+        string Subject,
+        string? Tool,
+        string? CommandJson)
+    {
+        public static RouterDecision Conversation(string subject = "unknown") =>
+            new("conversation", subject, null, null);
+    }
 }

@@ -6,17 +6,30 @@
 
 ## 進行中
 
-目前沒有進行中的項目。
+### FEAT-002 驗證對話紀錄與相關上下文第一版
+
+- 說明：固定使用者 `local-default` 的完整回合寫入 SQLite；回答前用 BM25 從最近兩輪選取相關上下文。
+- 完成條件：CMD 與 STT 共用流程；無關回合不加入 Prompt；相關回合可延續對話；不超過模型 token 預算。
+- 範圍限制：不包含長期記憶抽取、Profile、安全確認、embedding、向量資料庫、TurnId 或聲紋。
+- 規格：[使用者記憶設計（精簡版 V1）](reports/USER_MEMORY_DESIGN.md)。
+- 驗收：[使用者記憶第一版驗收清單](reports/USER_MEMORY_VERIFICATION.md)。
+- 已完成部分：四表 migration、完整回合寫入、最近兩輪讀取、中文字元 bigram BM25、設定式門檻與分數 log。
+- 驗證：建置成功；migration 冪等與資料讀回既有 smoke test 通過。BM25 實機案例尚待執行。
+- 下一步：依 [BM25 測試情境](../../BM25_TEST_SCENARIOS.md)驗證誤納入與漏納入，再校正 `MinimumBm25Score`。
+
+### FEAT-003 穩定單次 Conversation／Tool Router
+
+- 說明：對話是預設路徑；只有明確工具需求才由同一次 LLM 推論產生工具名稱與參數。
+- 完成條件：一般對話進入 `conversation`；時間、新聞、卡牌及關機進入正確工具；無效 JSON 安全回到對話。
+- 已完成部分：移除六 action 與第二次 Tool Planner；新增 `mode`、`subject` 及扁平工具參數。
+- 驗證：設定檔 JSON 有效且專案建置成功；實機回歸尚待完成。
 
 ## 下一步
 
-### FEAT-002 實作使用者記憶第一版
+### FEAT-004 重新定義長期記憶最小流程
 
-- 說明：依精簡版設計加入固定使用者識別、Profile、最近兩輪對話及不阻塞回答的背景記憶處理。
-- 完成條件：CMD 與 STT 共用記憶流程；一般資料可安全保存，敏感資料先確認，禁止資料不寫入；重啟後可讀回已確認資料。
-- 範圍限制：不實作 TurnId、聲紋、RAG、Profile Tool、細分 Profile 資料表或版本歷史。
-- 規格：[使用者記憶設計（精簡版 V1）](reports/USER_MEMORY_DESIGN.md)。
-- 驗收：[使用者記憶第一版驗收清單](reports/USER_MEMORY_VERIFICATION.md)。
+- 說明：`MemoryItems` 目前只有資料表，沒有保存、抽取或搜尋行為。
+- 完成條件：先確認資料來源、保存條件、敏感資料政策與查詢方式，再決定實作；不得由對話紀錄功能自行擴張。
 
 ## 待處理
 

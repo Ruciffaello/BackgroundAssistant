@@ -4,6 +4,35 @@
 
 ---
 
+## [Unreleased]
+
+### Added (新增)
+
+* 建立 `agent_memory.db` 四表 migration、固定 `local-default` 使用者及完整對話回合寫入。
+* 新增最近兩輪 BM25 相關性篩選；中文字元使用 bigram，門檻可由 `ConversationRelevance` 設定。
+* 新增 Router 與 BM25 人工測試劇本。
+
+### Changed (變更)
+
+* Router 收斂為 `conversation`／`tool`；一般對話為預設路徑。
+* Router JSON 新增 `subject`，工具名稱與參數由同一次 LLM 推論直接輸出。
+* 移除第二次 Tool Planner 推論及舊 `answer`、`chat`、`support`、`retrieve`、`clarify` 路由。
+* 無效 Router 輸出改為回到一般對話，不再一律要求澄清。
+* 最近對話放在目前輸入之前，且只有 BM25 達門檻才加入回答 Prompt。
+* BM25 排除通用問句詞，避免「什麼」等詞造成跨主題誤命中。
+* 相同輸入及具有明顯重複輸出的舊回合不再回灌到回答 Prompt。
+* 對話回答加入 repetition penalty 與重複尾段中止，降低小模型無限重複。
+* CMD `exit` 與 `system_control` 改為等待目前回應及 TTS 播放完成後再停止 Host。
+* BM25 排除通用問句詞，避免「什麼」等詞造成跨主題誤命中。
+* 相同輸入及具有明顯重複輸出的舊回合不再回灌到回答 Prompt。
+* 對話回答加入 repetition penalty 與重複尾段中止，降低小模型無限重複。
+
+### Not Implemented (尚未實作)
+
+* `MemoryItems` 長期記憶保存與搜尋、Profile、MemoryWorker、安全確認及向量搜尋。
+
+---
+
 ## [v0.4.0] - 2026-08-20
 
 ### Added (新增)

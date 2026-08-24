@@ -11,23 +11,28 @@ public class SystemTools : IMcpTool
 {
     private readonly ILogger<SystemTools> _logger;
     private readonly IHostApplicationLifetime _appLifetime;
+    private readonly Services.GlobalStateService _globalState;
 
     public string Name => "system_control";
 
-    public SystemTools(ILogger<SystemTools> logger, IHostApplicationLifetime appLifetime)
+    public SystemTools(
+        ILogger<SystemTools> logger,
+        IHostApplicationLifetime appLifetime,
+        Services.GlobalStateService globalState)
     {
         _logger = logger;
         _appLifetime = appLifetime;
+        _globalState = globalState;
     }
 
     public Task<string> ExecuteAsync(JsonElement root)
     {
         _logger.LogInformation("SystemTools: Shutdown requested.");
 
-        // 在背景非同步延遲 2.5 秒後觸發停止，確保 TTS 播報完成
+        // 工具結果返回後由 TTS 播放；背景工作等待整個回合真正進入 Idle 再關閉。
         _ = Task.Run(async () =>
         {
-            await Task.Delay(2500);
+            await _globalState.WaitUntilIdleAsync();
             _logger.LogInformation("SystemTools: Stopping application...");
             _appLifetime.StopApplication();
         });

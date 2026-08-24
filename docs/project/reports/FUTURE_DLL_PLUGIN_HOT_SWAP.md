@@ -42,7 +42,7 @@
 ## 整體架構
 
 ```text
-Tool Planner
+Tool-capable Router／Selector
     |
     v
 Tool Registry Snapshot
@@ -270,14 +270,13 @@ Disabled
 
 ## 與 Agent 決策流程的整合
 
-DLL Plugin 載入成功後，只更新 Tool Registry，不直接改變 Router 或 LLM Prompt 的固定程式碼。
+DLL Plugin 載入成功後更新 Tool Registry。現行 Router 把工具描述寫在 Prompt；實作動態插件時必須由 Registry 動態產生可用工具描述，不能繼續維護固定工具清單。
 
 ```text
 Input
     -> Decision Router
-    -> 需要工具
-    -> Tool Planner 取得最新 Registry Snapshot
-    -> 選擇內建工具或 DLL Plugin 工具
+    -> Router／Selector 取得最新 Registry Snapshot
+    -> 明確需要工具時選擇內建工具或 DLL Plugin 工具
     -> Tool Executor 執行
     -> 工具結果回到 Agent Context
     -> 產生回答或繼續下一輪決策
@@ -325,4 +324,3 @@ Input
 - Plugin 相依 DLL 可從自己的版本目錄解析。
 - Contract 版本不相容時能拒絕載入並輸出明確錯誤。
 - 不需重新建置或重新啟動 BackgroundAssistant。
-

@@ -2,6 +2,7 @@ using System.Threading.Channels;
 using BackgroundAssistant;
 using BackgroundAssistant.Tools;
 using BackgroundAssistant.Services;
+using BackgroundAssistant.Memory;
 using Microsoft.ML.OnnxRuntimeGenAI;
 
 // 設定全域 UTF8 編碼，防止亂碼
@@ -15,6 +16,9 @@ builder.Configuration.AddJsonFile("prompts.json", optional: false, reloadOnChang
 // 註冊基礎服務
 builder.Services.AddSingleton<IPhi35ModelService, Phi35ModelService>();
 builder.Services.AddSingleton<GlobalStateService>();
+builder.Services.AddSingleton<AgentMemoryDatabase>();
+builder.Services.AddSingleton<Bm25RelevanceScorer>();
+builder.Services.AddSingleton<RecentConversationService>();
 builder.Services.AddSingleton<SqliteDatabaseService>(sp => 
 {
     var logger = sp.GetRequiredService<ILogger<SqliteDatabaseService>>();
@@ -86,6 +90,7 @@ using var host = builder.Build();
 using (var scope = host.Services.CreateScope())
 {
     scope.ServiceProvider.GetRequiredService<SqliteDatabaseService>();
+    scope.ServiceProvider.GetRequiredService<AgentMemoryDatabase>();
 }
 
 host.Run();

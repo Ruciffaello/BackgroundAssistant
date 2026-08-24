@@ -1,12 +1,15 @@
-# 使用者記憶設計（精簡版 V1）
+# 對話資料與長期記憶設計邊界
+
+## 實作狀態
+
+截至 2026-08-24，已實作的只有固定使用者、完整對話回合、最近兩輪讀取及 BM25 相關性篩選。`MemoryItems` 尚未寫入或搜尋；Profile、MemoryWorker、敏感資料確認、忘記／清除及保存期限均尚未實作。下文標示為「未來規則」的內容不是現有功能。
 
 ## 目標
 
-第一版只處理三件事：
+目前階段只處理兩件事：
 
-1. 保留最近對話，讓回答能延續上下文。
-2. 儲存經過安全規則檢查的使用者資料與長期記憶。
-3. 為未來的聲紋辨識、RAG 與個性調整保留介面，但現在不實作。
+1. 保存完整使用者／助理回合。
+2. 回答前只帶入與目前輸入有詞彙關聯的最近對話。
 
 本文件是使用者記憶功能的第一版實作基準。若其他草案與本文件衝突，以本文件為準。
 
@@ -14,91 +17,50 @@
 
 ```text
 STT 輸入 -> 語音轉文字與文字整理 --+
-                                      +-> UserId -> Router -> 回答或工具 -> 立即輸出
-CMD 輸入 -----------------------------+                         |
-                                                                `-> MemoryJob
-                                                                     |
-                                                                     `-> 背景 MemoryWorker
-                                                                          -> MemoryPolicy
-                                                                          -> SQLite
+                                      +-> Router
+CMD 輸入 -----------------------------+     |-- conversation -> BM25 最近兩輪 -> LLM 回答
+                                            `-- tool -> McpToolExecutor
+                                                        |
+                                                        `-> 完成回合寫入 SQLite
 ```
 
 - STT 與 CMD 在取得乾淨文字後共用同一條流程。
 - 現有 Channel 與 GlobalState 已負責輸入排序，第一版不增加 `TurnId`。
-- 回答完成後立即輸出；記憶分析在背景執行，不阻塞使用者。
-- `MemoryJob` 必須攜帶完整快照，背景工作不回頭尋找某一輪對話。
-
-```csharp
-public sealed record MemoryJob(
-    string UserId,
-    string Input,
-    string Route,
-    string Response,
-    MemoryReviewHint ReviewHint);
-```
+- 目前沒有背景記憶分析或 `MemoryJob`。
 
 ## 第一版元件
 
-只建立以下元件：
+目前已建立：
 
-- `DefaultUserIdentityResolver`：目前固定回傳 `local-default`。
-- `AgentMemoryStore`：唯一的 SQLite 存取入口。
-- `ConversationContextService`：提供最近兩輪對話；接近 token 上限時才摘要。
-- `MemoryWorker`：在背景分析並提出記憶候選項目。
-- `MemoryPolicy`：決定允許儲存、需要確認或拒絕。
-- `LogRedactor`：避免敏感資料進入 log。
-- `AgentProfileService`：讀取與安全更新 Agent 個性 JSON。
+- `AgentMemoryDatabase`：migration、固定 `local-default`、完整回合寫入及最近回合讀取。
+- `RecentConversationService`：取得最近兩輪並組合相關 Context。
+- `Bm25RelevanceScorer`：對目前輸入與候選使用者原文評分。
 
-介面只保留確定會替換的邊界：
-
-```csharp
-public interface IUserIdentityResolver
-{
-    ValueTask<string> ResolveUserIdAsync(CancellationToken cancellationToken);
-}
-
-public interface IAgentMemoryStore
-{
-    // 實際方法在實作階段依使用案例加入，不預先拆成多個 Repository。
-}
-```
+目前沒有額外建立尚未使用的 Identity Resolver、Repository、MemoryWorker 或 Policy 抽象。
 
 ## SQLite 結構
 
-第一版使用獨立的 `agent_memory.db`，只建立六張表：
+第一階段使用獨立的 `agent_memory.db`，只建立四張表：
 
 | 資料表 | 用途 |
 | --- | --- |
 | `SchemaMigrations` | 資料庫版本與 migration 紀錄 |
 | `Users` | 使用者基本識別；目前只有 `local-default` |
-| `UserProfiles` | 一位使用者一份 `ProfileJson` |
-| `ConversationSessions` | 對話工作階段 |
-| `ConversationMessages` | 對話訊息 |
-| `MemoryItems` | 可檢索的長期事實或偏好 |
+| `ConversationMessages` | 已完成的使用者／助理回合 |
+| `MemoryItems` | 後續明確記憶使用的純文字資料 |
 
-`UserProfiles.ProfileJson` 可包含：
+`ConversationMessages` 會保存完成的回合。回答前最多讀取兩輪，以目前輸入和各輪 `UserText` 計算 BM25；中文字元使用 bigram，並排除「什麼、怎麼、如何、請問、知道」等通用問句詞。相同使用者輸入及具有明顯重複輸出的舊回合不作為候選。只有達 `MinimumBm25Score` 的回合才將使用者與助理文字一起加入 Prompt。`MemoryItems` 尚未接上保存或搜尋流程。Profile 與 Session 資料表不存在。
 
-- 個性特徵
-- 興趣
-- 年齡
-- 職業
-- 財富狀況（預設「一般」）
-- 健康狀況
-- 家人名單
-- 朋友名單
+## 長期記憶判斷與安全規則（未來規則，尚未實作）
 
-第一版不將每一類資料拆成獨立資料表。當查詢、索引或關聯需求實際出現時，再以 migration 正規化。
-
-## 記憶判斷與安全規則
-
-Router 前只做便宜的初步標記：
+若未來加入長期記憶，必須另外確認抽取與安全規則。現行 Router 不輸出任何記憶標記，也沒有以下 `None`／`Likely`／`Explicit`／`Forbidden` 分類：
 
 - `None`：看不出需要記憶。
 - `Likely`：可能是穩定偏好或個人資料。
 - `Explicit`：使用者明確要求記住。
 - `Forbidden`：疑似禁止保存的資料。
 
-回答後，`MemoryWorker` 使用當輪快照抽取候選資料；最終是否寫入由 C# `MemoryPolicy` 決定，不能讓 LLM 自行決定。
+以下 Policy 結果同樣只是待確認的設計方向，現行程式沒有 `MemoryWorker` 或 `MemoryPolicy`：
 
 政策結果只有三種：
 
@@ -120,7 +82,7 @@ Router 前只做便宜的初步標記：
 
 若衝突資料會影響當前回答，Agent 可以向使用者確認；否則不應為了補齊 Profile 主動打斷對話。
 
-### 保存與刪除週期
+### 保存與刪除週期（提案，尚未實作）
 
 - `UserProfiles` 與 `MemoryItems` 持續保存，直到使用者要求修改或刪除。
 - `ConversationMessages` 保存最近 30 天。
@@ -134,7 +96,7 @@ Router 前只做便宜的初步標記：
 2. 同時刪除能明確定位的相關對話訊息。
 3. 若無法可靠定位，讓使用者選擇清除目前 Session 或全部對話，不以模糊比對大量刪除訊息。
 
-## Agent 個性
+## Agent 個性（未來提案，尚未實作）
 
 Agent 個性使用 `agent_profile.json`，與使用者資料分開：
 
@@ -155,7 +117,7 @@ Agent 個性使用 `agent_profile.json`，與使用者資料分開：
 - `PendingProfileChanges` 持久化
 - 完整 Profile 修改歷史與 `IsActive` 版本鏈
 - 固定每八輪摘要；改為 token 壓力出現時才摘要
-- Embedding、向量索引與 RAG
+- Embedding、向量索引與語意 RAG；目前只有最近對話的 BM25 詞彙篩選
 - 讓使用者查詢 Profile 的 Tool
 - DLL 擴充工具
 - 多使用者同時寫入與分散式併發控制
@@ -164,18 +126,17 @@ Agent 個性使用 `agent_profile.json`，與使用者資料分開：
 ## 未來擴充邊界
 
 - 聲紋辨識只需新增另一個 `IUserIdentityResolver` 實作，不改動後續流程。
-- RAG 由 Router 的 `retrieve` 路徑接入；檢索結果仍需重新判斷是否足以回答。
+- 長期記憶搜尋若實作，應作為 `conversation` 回答前的 Context Provider，不恢復獨立 `retrieve` action。
 - Profile JSON 需要複雜查詢時，再透過 migration 拆表。
 - 待確認資料需要跨重啟保存時，再新增持久化佇列。
 - DLL 熱抽換依獨立設計文件實作，不與第一版記憶功能綁定。
 
-## 第一版完成條件
+## 目前階段完成條件
 
-- CMD 與 STT 都能取得 `local-default` 並共用後續流程。
-- 回答可帶入最近兩輪對話，且不超過模型 token 預算。
-- 回答輸出不等待記憶分析完成。
-- 一般偏好可寫入，敏感資料會要求確認，禁止資料不會寫入或記錄至 log。
-- 重啟後可以讀回已確認的 Profile 與長期記憶。
-- 尚未實作的延後項目不產生空介面、空資料表或預留流程。
+- CMD 與 STT 共用 Router、回答、工具及對話寫入流程。
+- 完成回合可在重啟後讀回。
+- 最近最多兩輪逐筆經 BM25 過濾，無關內容不加入 Prompt。
+- 相關 Context 加入後仍不超過模型 token 預算。
+- 長期記憶、Profile 與安全政策不被誤稱為已完成。
 
 完整驗收案例見[使用者記憶第一版驗收清單](USER_MEMORY_VERIFICATION.md)。

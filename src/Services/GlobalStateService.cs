@@ -7,6 +7,7 @@ public class GlobalStateService
 {
     private bool _isBusy = false;
     private readonly object _lock = new object();
+    private TaskCompletionSource _idleCompletion = CreateCompletedIdleSignal();
 
     /// <summary>
     /// 系統是否正處於忙碌狀態（推論中或播報中）。
@@ -28,6 +29,8 @@ public class GlobalStateService
         {
             if (_isBusy) return false;
             _isBusy = true;
+            _idleCompletion = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
             return true;
         }
     }
@@ -37,7 +40,15 @@ public class GlobalStateService
     /// </summary>
     public void SetBusy()
     {
-        lock (_lock) _isBusy = true;
+        lock (_lock)
+        {
+            if (!_isBusy)
+            {
+                _idleCompletion = new TaskCompletionSource(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+            _isBusy = true;
+        }
     }
 
     /// <summary>
@@ -45,6 +56,33 @@ public class GlobalStateService
     /// </summary>
     public void SetIdle()
     {
-        lock (_lock) _isBusy = false;
+        TaskCompletionSource completion;
+        lock (_lock)
+        {
+            _isBusy = false;
+            completion = _idleCompletion;
+        }
+        completion.TrySetResult();
+    }
+
+    /// <summary>
+    /// 等待目前的推論、工具與 TTS 回合全部完成。若已閒置則立即返回。
+    /// </summary>
+    public Task WaitUntilIdleAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_lock)
+        {
+            return _isBusy
+                ? _idleCompletion.Task.WaitAsync(cancellationToken)
+                : Task.CompletedTask;
+        }
+    }
+
+    private static TaskCompletionSource CreateCompletedIdleSignal()
+    {
+        var completion = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        completion.SetResult();
+        return completion;
     }
 }

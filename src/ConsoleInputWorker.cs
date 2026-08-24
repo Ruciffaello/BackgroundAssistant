@@ -49,9 +49,10 @@ public class ConsoleInputWorker : InputWorkerBase
                         line == "結束" || line == "再見" || line == "退出")
                     {
                         Console.ForegroundColor = ConsoleColor.Green;
-                        Console.WriteLine("\n[系統通知] 收到結束指令，正在優雅關閉 BackgroundAssistant...");
+                        Console.WriteLine("\n[系統通知] 收到結束指令，將在目前回應與語音播報完成後關閉 BackgroundAssistant...");
                         Console.ResetColor();
 
+                        await GlobalState.WaitUntilIdleAsync(stoppingToken);
                         _appLifetime.StopApplication();
                         break;
                     }

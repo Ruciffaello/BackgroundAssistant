@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using BackgroundAssistant.Tools;
+using BackgroundAssistant.Memory;
 
 namespace BackgroundAssistant;
 
@@ -16,16 +17,19 @@ public class McpToolExecutor : BackgroundService
     private readonly ChannelReader<string> _jsonCommandReader;
     private readonly ChannelWriter<string> _resultWriter;
     private readonly IEnumerable<IMcpTool> _tools;
+    private readonly RecentConversationService _recentConversation;
 
     public McpToolExecutor(
         ILogger<McpToolExecutor> logger, 
         [FromKeyedServices("JsonCommand")] Channel<string> jsonCommandChannel,
         [FromKeyedServices("ExecutionResult")] Channel<string> executionResultChannel,
+        RecentConversationService recentConversation,
         IEnumerable<IMcpTool> tools)
     {
         _logger = logger;
         _jsonCommandReader = jsonCommandChannel.Reader;
         _resultWriter = executionResultChannel.Writer;
+        _recentConversation = recentConversation;
         _tools = tools;
     }
 
@@ -39,7 +43,9 @@ public class McpToolExecutor : BackgroundService
             {
                 if (jsonStr == "無法執行")
                 {
-                    await _resultWriter.WriteAsync("抱歉，我無法理解您的指令。", stoppingToken);
+                    const string unavailableResponse = "抱歉，我無法理解您的指令。";
+                    await _resultWriter.WriteAsync(unavailableResponse, stoppingToken);
+                    _recentConversation.CompleteTurn(unavailableResponse);
                     continue;
                 }
 
@@ -77,6 +83,7 @@ public class McpToolExecutor : BackgroundService
                 Console.WriteLine($"[4. Execution Result]: {resultText}");
                 // 送往語音播報階段
                 await _resultWriter.WriteAsync(resultText, stoppingToken);
+                _recentConversation.CompleteTurn(resultText);
             }
         }
         catch (OperationCanceledException)
