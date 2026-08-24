@@ -43,7 +43,7 @@ CMD 輸入 ----------------------------------+                  |
 
 ### Now
 
-- 依 [BM25 測試情境](BM25_TEST_SCENARIOS.md)驗證路由與上下文過濾。
+- 依 [BM25 測試情境](docs/testing/BM25_TEST_SCENARIOS.md)驗證路由與上下文過濾。
 - 收集實際 BM25 分數後校正門檻及中文分詞。
 
 ### Next
@@ -66,10 +66,11 @@ CMD 輸入 ----------------------------------+                  |
 | --- | --- |
 | [TASKS.md](docs/project/TASKS.md) | 工作狀態唯一來源 |
 | [DECISIONS.md](docs/project/DECISIONS.md) | 重要架構決策 |
+| [docs/README.md](docs/README.md) | 完整文件分類與索引 |
 | [PARSER_REDESIGN.md](docs/project/reports/PARSER_REDESIGN.md) | 現行 Router 規格 |
 | [USER_MEMORY_DESIGN.md](docs/project/reports/USER_MEMORY_DESIGN.md) | 對話資料與未來記憶邊界 |
-| [BM25_TEST_SCENARIOS.md](BM25_TEST_SCENARIOS.md) | Router 與 BM25 人工測試劇本 |
-| [TEST_GUIDE.md](TEST_GUIDE.md) | 一般人工測試方式 |
+| [BM25_TEST_SCENARIOS.md](docs/testing/BM25_TEST_SCENARIOS.md) | Router 與 BM25 人工測試劇本 |
+| [TEST_GUIDE.md](docs/testing/TEST_GUIDE.md) | 一般人工測試方式 |
 | [CHANGELOG.md](CHANGELOG.md) | 正式變更歷史 |
 
 ---

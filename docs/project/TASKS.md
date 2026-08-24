@@ -15,7 +15,7 @@
 - 驗收：[使用者記憶第一版驗收清單](reports/USER_MEMORY_VERIFICATION.md)。
 - 已完成部分：四表 migration、完整回合寫入、最近兩輪讀取、中文字元 bigram BM25、設定式門檻與分數 log。
 - 驗證：建置成功；migration 冪等與資料讀回既有 smoke test 通過。BM25 實機案例尚待執行。
-- 下一步：依 [BM25 測試情境](../../BM25_TEST_SCENARIOS.md)驗證誤納入與漏納入，再校正 `MinimumBm25Score`。
+- 下一步：依 [BM25 測試情境](../testing/BM25_TEST_SCENARIOS.md)驗證誤納入與漏納入，再校正 `MinimumBm25Score`。
 
 ### FEAT-003 穩定單次 Conversation／Tool Router
 
