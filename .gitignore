@@ -39,6 +39,8 @@ project.assets.json
 logs/
 temp/
 tmp/
+.plugin-cache/
+/plugins/
 
 ## OS Metadata
 Thumbs.db

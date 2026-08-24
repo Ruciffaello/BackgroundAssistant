@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>BackgroundAssistant.FileSearchTool</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\PluginContracts\BackgroundAssistant.PluginContracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="plugin.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="DeployPluginForHost" AfterTargets="Build">
+    <PropertyGroup>
+      <PluginDeploymentDirectory>$(MSBuildProjectDirectory)\..\..\..\plugins\file_search</PluginDeploymentDirectory>
+    </PropertyGroup>
+    <MakeDir Directories="$(PluginDeploymentDirectory)" />
+    <Copy SourceFiles="$(TargetPath);$(MSBuildProjectDirectory)\plugin.json"
+          DestinationFolder="$(PluginDeploymentDirectory)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

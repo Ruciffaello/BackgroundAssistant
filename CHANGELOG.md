@@ -11,6 +11,11 @@
 * 建立 `agent_memory.db` 四表 migration、固定 `local-default` 使用者及完整對話回合寫入。
 * 新增最近兩輪 BM25 相關性篩選；中文字元使用 bigram，門檻可由 `ConversationRelevance` 設定。
 * 新增 Router 與 BM25 人工測試劇本。
+* 新增 DLL 工具插件契約與執行期架構（`BackgroundAssistant.PluginContracts`、`BackgroundAssistant.PluginRuntime`）。
+* 實作 `ToolManifestCatalog`：啟動時只掃描 `plugins/*/plugin.json`，不預先載入 DLL。
+* 實作 `LazyDllToolLoader`：按需載入、SHA-256 指紋比對、`.plugin-cache/` 影子副本防 Windows 鎖檔、`AssemblyLoadContext` 隔離、更新失敗自動保留舊版實例。
+* 實作 `FileSearchTool`（`BackgroundAssistant.FileSearchTool`）：以 `ripgrep` 進行本機檔案搜尋，支援全名優先、包含 fallback、中文與特殊字元，結果不進 TTS。
+* 新增 `FileSearchTool.Tests` 測試套件，包含延遲載入、損壞替換防護與全磁碟搜尋等 12 項測試。
 
 ### Changed (變更)
 
@@ -23,9 +28,11 @@
 * 相同輸入及具有明顯重複輸出的舊回合不再回灌到回答 Prompt。
 * 對話回答加入 repetition penalty 與重複尾段中止，降低小模型無限重複。
 * CMD `exit` 與 `system_control` 改為等待目前回應及 TTS 播放完成後再停止 Host。
-* BM25 排除通用問句詞，避免「什麼」等詞造成跨主題誤命中。
-* 相同輸入及具有明顯重複輸出的舊回合不再回灌到回答 Prompt。
-* 對話回答加入 repetition penalty 與重複尾段中止，降低小模型無限重複。
+* 縮短 Router Prompt 與 User Template，外部工具僅注入名稱與必要參數，避免超出 1024 Token 限制。
+
+### Fixed (修復)
+
+* 修復 `RipgrepFileSearcher` 在 Windows 搜尋全磁碟（如 `C:\`、`D:\`）時，因受保護系統目錄「存取被拒 (os error 5)」導致 `rg` 返回 Exit Code 2 而誤判為搜尋失敗的問題。
 
 ### Not Implemented (尚未實作)
 

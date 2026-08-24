@@ -1,0 +1,20 @@
+{
+  "id": "file_search",
+  "version": "1.0.0",
+  "contractVersion": 1,
+  "entryAssembly": "BackgroundAssistant.FileSearchTool.dll",
+  "entryType": "BackgroundAssistant.FileSearch.FileSearchTool",
+  "speakResult": false,
+  "description": "依照檔名搜尋電腦中的檔案；先使用完整檔名，找不到才回傳名稱包含結果。",
+  "inputSchema": {
+    "type": "object",
+    "required": ["fileName"],
+    "properties": {
+      "fileName": {
+        "type": "string",
+        "description": "要尋找的檔案名稱，不包含目錄路徑"
+      }
+    },
+    "additionalProperties": false
+  }
+}

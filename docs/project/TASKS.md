@@ -35,7 +35,7 @@
 
 ### TECH-001 建立可重複驗證的開發流程
 
-- 說明：目前沒有正式測試專案與自動建置流程。
+- 說明：目前既有核心業務與插件已具備獨立單元測試專案，尚需逐步擴展至端到端與 CI 自動建置流程。
 - 完成條件：專案具備可執行的自動建置與基礎測試，結果可被重複驗證。
 
 ### TECH-002 完成本地工具實作與行為校正
@@ -53,11 +53,6 @@
 - 說明：加入喚醒詞，降低非指令語音進入處理流程的機會。
 - 完成條件：喚醒條件、資源限制與語音流程整合均通過驗證。
 
-### TECH-004 設計 DLL 工具插件機制
-
-- 說明：讓產品可透過 DLL 插件加入特定功能，並納入統一工具目錄。
-- 完成條件：定義插件契約、manifest、載入生命週期、安全、錯誤隔離及版本相容規則。
-
 ## 暫緩
 
 ### TECH-005 建立雙向 MCP 與合作方工具整合
@@ -67,6 +62,17 @@
 - 參考：[MCP 對接差異報告](reports/MCP_INTEGRATION_GAP.md)、[DEC-002](DECISIONS.md#dec-002-採用雙向-mcp-與-dll-插件並存的產品定位)。
 
 ## 最近完成
+
+### TECH-004 設計與實作 DLL 工具插件機制
+
+- 說明：讓產品可透過延遲載入 DLL 插件擴充功能，並納入統一工具目錄。
+- 完成：2026-08-25。
+- 交付項目：
+  - `BackgroundAssistant.PluginContracts`：定義 `IAgentTool`、`ToolDescriptor`、`ToolResult`。
+  - `BackgroundAssistant.PluginRuntime`：實作 `ToolManifestCatalog` 與 `LazyDllToolLoader`（支援 SHA-256 指紋比對、影子副本防鎖檔、可回收 ALC、損壞新版自動回退）。
+  - `BackgroundAssistant.FileSearchTool`：實作基於 `ripgrep` 之本機全磁碟檔名搜尋工具，支援完整相符優先、包含 fallback、中文與特殊字元，自動處理 Windows 系統目錄權限跳過，結果不進 TTS。
+  - `FileSearchTool.Tests`：包含 12 項可重複驗證之自動化單元測試。
+- 驗證：12/12 單元測試通過，實機全磁碟搜尋功能驗證成功。
 
 ### TECH-006 導入輕量文件管理
 

@@ -4,6 +4,7 @@ using System.Globalization;
 using BackgroundAssistant.Services;
 using BackgroundAssistant.Tools;
 using BackgroundAssistant.Memory;
+using BackgroundAssistant.PluginRuntime;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.ML.OnnxRuntimeGenAI;
@@ -18,12 +19,15 @@ public class IntentParserWorker : BackgroundService
     private const int RouterOutputTokens = 96;
     private const int AnswerOutputTokens = 300;
     private const int TokenSafetyMargin = 16;
+    private const string MinimalRouterTemplate =
+        "<|system|>\n{SystemPrompt}<|end|>\n<|user|>{InputText}<|end|>\n<|assistant|>";
 
     private readonly ILogger<IntentParserWorker> _logger;
     private readonly IConfiguration _configuration;
     private readonly IPhi35ModelService _modelService;
     private readonly PinyinCorrectionService _pinyinService;
     private readonly HashSet<string> _availableToolNames;
+    private readonly string _externalToolCatalog;
     private readonly ChannelReader<string> _cleanTextReader;
     private readonly ChannelWriter<string> _jsonCommandWriter;
     private readonly ChannelWriter<string> _answerWriter;
@@ -38,6 +42,7 @@ public class IntentParserWorker : BackgroundService
         PinyinCorrectionService pinyinService,
         RecentConversationService recentConversation,
         IEnumerable<IMcpTool> tools,
+        ToolManifestCatalog toolManifestCatalog,
         [FromKeyedServices("CleanText")] Channel<string> cleanTextChannel,
         [FromKeyedServices("JsonCommand")] Channel<string> jsonCommandChannel,
         [FromKeyedServices("ExecutionResult")] Channel<string> executionResultChannel)
@@ -48,6 +53,8 @@ public class IntentParserWorker : BackgroundService
         _pinyinService = pinyinService;
         _recentConversation = recentConversation;
         _availableToolNames = tools.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
+        _availableToolNames.UnionWith(toolManifestCatalog.Tools.Select(tool => tool.Manifest.Id));
+        _externalToolCatalog = toolManifestCatalog.BuildRouterCatalog();
         _cleanTextReader = cleanTextChannel.Reader;
         _jsonCommandWriter = jsonCommandChannel.Writer;
         _answerWriter = executionResultChannel.Writer;
@@ -71,31 +78,42 @@ public class IntentParserWorker : BackgroundService
             await foreach (string text in _cleanTextReader.ReadAllAsync(stoppingToken))
             {
                 if (string.IsNullOrWhiteSpace(text)) continue;
-
-                string contextualInput = AddRecentContext(text, _recentConversation.BuildPromptContext(text));
-                _recentConversation.BeginTurn(text);
-
-                RouterDecision decision = await DecideAsync(text, stoppingToken);
-                _logger.LogInformation(
-                    "Router decision for '{text}': {mode}, subject: {subject}",
-                    text,
-                    decision.Mode,
-                    decision.Subject);
-
-                switch (decision.Mode)
+                try
                 {
-                    case "conversation":
-                        await WriteResponseAsync(contextualInput, "ChatAnswer", "Chat", stoppingToken);
-                        break;
+                    string contextualInput = AddRecentContext(text, _recentConversation.BuildPromptContext(text));
+                    _recentConversation.BeginTurn(text);
 
-                    case "tool":
-                        await DispatchToolAsync(decision, stoppingToken);
-                        break;
+                    RouterDecision decision = await DecideAsync(text, stoppingToken);
+                    _logger.LogInformation(
+                        "Router decision for '{text}': {mode}, subject: {subject}",
+                        text,
+                        decision.Mode,
+                        decision.Subject);
 
-                    default:
-                        _logger.LogWarning("Unknown router mode: {mode}; falling back to conversation.", decision.Mode);
-                        await WriteResponseAsync(contextualInput, "ChatAnswer", "Chat", stoppingToken);
-                        break;
+                    switch (decision.Mode)
+                    {
+                        case "conversation":
+                            await WriteResponseAsync(contextualInput, "ChatAnswer", "Chat", stoppingToken);
+                            break;
+
+                        case "tool":
+                            await DispatchToolAsync(decision, stoppingToken);
+                            break;
+
+                        default:
+                            _logger.LogWarning("Unknown router mode: {mode}; falling back to conversation.", decision.Mode);
+                            await WriteResponseAsync(contextualInput, "ChatAnswer", "Chat", stoppingToken);
+                            break;
+                    }
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Decision Router failed for input: {text}", text);
+                    await WriteFinalTextAsync("抱歉，這次指令處理失敗，請再試一次。", stoppingToken);
                 }
             }
         }
@@ -112,8 +130,27 @@ public class IntentParserWorker : BackgroundService
     private async Task<RouterDecision> DecideAsync(string text, CancellationToken ct)
     {
         string systemPrompt = _configuration["PromptSettings:DecisionRouter:SystemPrompt"] ?? "";
+        if (!string.IsNullOrWhiteSpace(_externalToolCatalog))
+        {
+            systemPrompt = $"{systemPrompt}\n{_externalToolCatalog}";
+        }
         string userTemplate = _configuration["PromptSettings:DecisionRouter:UserTemplate"] ?? "";
-        string prompt = BuildPromptWithinBudget(systemPrompt, userTemplate, text, RouterOutputTokens);
+        string prompt;
+        try
+        {
+            prompt = BuildPromptWithinBudget(systemPrompt, userTemplate, text, RouterOutputTokens);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Router few-shot template exceeded the token budget; using the minimal template.");
+            prompt = BuildPromptWithinBudget(
+                systemPrompt,
+                MinimalRouterTemplate,
+                text,
+                RouterOutputTokens);
+        }
         string response = await RunInferenceAsync(prompt, RouterOutputTokens, ct);
 
         Console.WriteLine($"\n[3. Decision Router]:\n{response.Trim()}");

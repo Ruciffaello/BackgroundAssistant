@@ -11,6 +11,22 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- 子專案由各自的 csproj 編譯，避免根目錄專案重複納入來源檔。 -->
+    <Compile Remove="src\PluginContracts\**\*.cs" />
+    <Compile Remove="src\PluginRuntime\**\*.cs" />
+    <Compile Remove="src\Plugins\**\*.cs" />
+    <Compile Remove="tests\FileSearchTool.Tests\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="src\PluginContracts\BackgroundAssistant.PluginContracts.csproj" />
+    <ProjectReference Include="src\PluginRuntime\BackgroundAssistant.PluginRuntime.csproj" />
+    <!-- 建置 FileSearch DLL，但不把它當作 Host 的靜態程式參考。 -->
+    <ProjectReference Include="src\Plugins\FileSearch\BackgroundAssistant.FileSearchTool.csproj"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.8" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
     <!-- 核心推論引擎 -->

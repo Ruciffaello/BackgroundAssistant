@@ -3,6 +3,7 @@ using BackgroundAssistant;
 using BackgroundAssistant.Tools;
 using BackgroundAssistant.Services;
 using BackgroundAssistant.Memory;
+using BackgroundAssistant.PluginRuntime;
 using Microsoft.ML.OnnxRuntimeGenAI;
 
 // 設定全域 UTF8 編碼，防止亂碼
@@ -19,6 +20,39 @@ builder.Services.AddSingleton<GlobalStateService>();
 builder.Services.AddSingleton<AgentMemoryDatabase>();
 builder.Services.AddSingleton<Bm25RelevanceScorer>();
 builder.Services.AddSingleton<RecentConversationService>();
+builder.Services.AddSingleton(sp =>
+{
+    var configuration = sp.GetRequiredService<IConfiguration>();
+    var environment = sp.GetRequiredService<IHostEnvironment>();
+    var logger = sp.GetRequiredService<ILogger<ToolManifestCatalog>>();
+    var configuredPath = configuration["PluginRuntime:Directory"] ?? "plugins";
+    var pluginDirectory = Path.IsPathFullyQualified(configuredPath)
+        ? configuredPath
+        : Path.Combine(environment.ContentRootPath, configuredPath);
+    var catalog = new ToolManifestCatalog(pluginDirectory);
+
+    foreach (var issue in catalog.Issues)
+    {
+        logger.LogWarning("Skipping invalid plugin manifest {path}: {message}", issue.Path, issue.Message);
+    }
+
+    logger.LogInformation(
+        "Plugin manifest catalog loaded {count} external tools from {path}.",
+        catalog.Tools.Count,
+        catalog.PluginRootDirectory);
+    return catalog;
+});
+builder.Services.AddSingleton(sp =>
+{
+    var configuration = sp.GetRequiredService<IConfiguration>();
+    var environment = sp.GetRequiredService<IHostEnvironment>();
+    var catalog = sp.GetRequiredService<ToolManifestCatalog>();
+    var configuredPath = configuration["PluginRuntime:CacheDirectory"] ?? ".plugin-cache";
+    var cacheDirectory = Path.IsPathFullyQualified(configuredPath)
+        ? configuredPath
+        : Path.Combine(environment.ContentRootPath, configuredPath);
+    return new LazyDllToolLoader(catalog, cacheDirectory);
+});
 builder.Services.AddSingleton<SqliteDatabaseService>(sp => 
 {
     var logger = sp.GetRequiredService<ILogger<SqliteDatabaseService>>();
