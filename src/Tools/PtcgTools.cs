@@ -8,8 +8,16 @@ namespace BackgroundAssistant.Tools;
 /// </summary>
 public class PtcgTools : IMcpTool
 {
+    /// <summary>
+    /// 工具唯一識別名稱。
+    /// </summary>
     public string Name => "ptcg_search";
 
+    /// <summary>
+    /// 執行寶可夢卡牌資訊搜尋（目前為模擬回應）。
+    /// </summary>
+    /// <param name="root">包含 query 卡牌名稱的 JSON 參數。</param>
+    /// <returns>卡牌資訊描述文字。</returns>
     public async Task<string> ExecuteAsync(JsonElement root)
     {
         // 嘗試從 JSON 提取 query 參數

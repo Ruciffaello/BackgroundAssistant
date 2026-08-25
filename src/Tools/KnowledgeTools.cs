@@ -8,8 +8,16 @@ namespace BackgroundAssistant.Tools;
 /// </summary>
 public class KnowledgeTools : IMcpTool
 {
+    /// <summary>
+    /// 工具唯一識別名稱。
+    /// </summary>
     public string Name => "knowledge_search";
 
+    /// <summary>
+    /// 執行知識庫查詢邏輯（目前為模擬回應）。
+    /// </summary>
+    /// <param name="root">包含 query 關鍵字的 JSON 參數。</param>
+    /// <returns>知識庫查詢回應文字。</returns>
     public async Task<string> ExecuteAsync(JsonElement root)
     {
         string query = root.TryGetProperty("query", out var q) ? q.GetString()! : "未知主題";

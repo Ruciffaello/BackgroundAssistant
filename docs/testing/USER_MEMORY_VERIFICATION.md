@@ -100,6 +100,6 @@ Agent 主動修改個性、確認流程與檔案備份不屬於本次 SQLite 記
 
 - 第 1～3 節及第 10 節沒有未處理的失敗項目；第 4～9 節不在目前範圍。
 - 自動化測試、整合測試或人工驗證結果已留下可追蹤紀錄。
-- 實際資料庫 schema 與[設計邊界](USER_MEMORY_DESIGN.md)一致。
-- [BM25 測試情境](../../testing/BM25_TEST_SCENARIOS.md)的結果已記錄並處理失敗項目。
+- 實際資料庫 schema 與[設計邊界](../design/USER_MEMORY_DESIGN.md)一致。
+- [BM25 測試情境](BM25_TEST_SCENARIOS.md)的結果已記錄並處理失敗項目。
 - 未來長期記憶章節不列入這個階段的完成條件，也不得標成已實作。

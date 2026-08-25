@@ -4,8 +4,8 @@ using System.Text;
 namespace BackgroundAssistant.Memory;
 
 /// <summary>
-/// Coordinates the single in-flight turn guaranteed by GlobalStateService and
-/// exposes only the two most recent completed turns as prompt context.
+/// 最近對話上下文協調服務。
+/// 配合 GlobalStateService 確保單一正在進行的回合，並使用 BM25 演算法篩選最近完成的對話回合以提供給 Prompt 使用。
 /// </summary>
 public sealed class RecentConversationService
 {
@@ -17,6 +17,13 @@ public sealed class RecentConversationService
     private readonly object _gate = new();
     private string? _pendingUserText;
 
+    /// <summary>
+    /// 初始化 <see cref="RecentConversationService"/> 的新執行個體。
+    /// </summary>
+    /// <param name="database">對話記憶資料庫。</param>
+    /// <param name="relevanceScorer">BM25 相關性評分器。</param>
+    /// <param name="configuration">應用程式組態設定。</param>
+    /// <param name="logger">記錄器實例。</param>
     public RecentConversationService(
         AgentMemoryDatabase database,
         Bm25RelevanceScorer relevanceScorer,
@@ -37,6 +44,11 @@ public sealed class RecentConversationService
             : 0.25d;
     }
 
+    /// <summary>
+    /// 依據當前使用者輸入，從最近歷史對話中以 BM25 篩選高相關性回合並組合成 Prompt 上下文字串。
+    /// </summary>
+    /// <param name="currentInput">當前使用者輸入文字。</param>
+    /// <returns>格式化後的先前對話上下文字串；若無相關對話則回傳空字串。</returns>
     public string BuildPromptContext(string currentInput)
     {
         IReadOnlyList<ConversationTurn> turns = _database.GetRecentTurns(
@@ -81,6 +93,12 @@ public sealed class RecentConversationService
         return builder.ToString().TrimEnd();
     }
 
+    /// <summary>
+    /// 比較當前輸入與歷史輸入是否為相同字句（忽略大小寫與標點符號），以避免 Prompt 重複回灌。
+    /// </summary>
+    /// <param name="currentInput">當前使用者輸入。</param>
+    /// <param name="candidateInput">歷史候選使用者輸入。</param>
+    /// <returns>若實質內容相同則為 true，否則為 false。</returns>
     private static bool IsSameInput(string currentInput, string candidateInput)
     {
         static string Normalize(string value) => new(
@@ -91,6 +109,11 @@ public sealed class RecentConversationService
         return Normalize(currentInput) == Normalize(candidateInput);
     }
 
+    /// <summary>
+    /// 檢查文字內容是否包含過度重複的片段（例如小模型常見的跳針現象），若有則排除該歷史回合。
+    /// </summary>
+    /// <param name="text">要檢查的文字內容。</param>
+    /// <returns>若出現重複 6 次以上的字句片段則為 true，否則為 false。</returns>
     private static bool HasExcessiveRepetition(string text)
     {
         string compact = new(text.Where(character => !char.IsWhiteSpace(character)).ToArray());
@@ -113,6 +136,10 @@ public sealed class RecentConversationService
         return false;
     }
 
+    /// <summary>
+    /// 標記新對話回合開始，並暫存使用者當前輸入文字。
+    /// </summary>
+    /// <param name="userText">使用者輸入文字。</param>
     public void BeginTurn(string userText)
     {
         lock (_gate)
@@ -125,6 +152,10 @@ public sealed class RecentConversationService
         }
     }
 
+    /// <summary>
+    /// 完成當前對話回合，並將使用者輸入與助理回覆非同步寫入 SQLite 資料庫中。
+    /// </summary>
+    /// <param name="assistantText">助理回覆文字（或工具摘要文字）。</param>
     public void CompleteTurn(string assistantText)
     {
         string? userText;

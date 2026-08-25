@@ -18,6 +18,14 @@ public class TextRefinerWorker : BackgroundService
     private readonly ChannelReader<string> _rawTextReader;
     private readonly ChannelWriter<string> _cleanTextWriter;
 
+    /// <summary>
+    /// 初始化 <see cref="TextRefinerWorker"/> 的新執行個體。
+    /// </summary>
+    /// <param name="logger">記錄器實例。</param>
+    /// <param name="configuration">應用程式組態。</param>
+    /// <param name="modelService">共享的 Phi-3.5 模型服務。</param>
+    /// <param name="rawTextChannel">原始語音文字通道。</param>
+    /// <param name="cleanTextChannel">精煉後核心文字通道。</param>
     public TextRefinerWorker(
         ILogger<TextRefinerWorker> logger, 
         IConfiguration configuration,
@@ -32,6 +40,10 @@ public class TextRefinerWorker : BackgroundService
         _cleanTextWriter = cleanTextChannel.Writer;
     }
 
+    /// <summary>
+    /// 背景執行迴圈：從 RawText 讀取字串，調用 LLM 移除贅字並輸出至 CleanText。
+    /// </summary>
+    /// <param name="stoppingToken">取消語彙基元。</param>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Text Refiner Worker starting (Shared Session)...");

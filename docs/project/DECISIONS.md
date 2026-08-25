@@ -5,7 +5,7 @@
 ## DEC-001 採用輕量文件管理
 
 - 日期：2026-08-21。
-- 決定：以 `PROJECT_STATUS.md` 作為總覽、`TASKS.md` 作為唯一工作狀態來源、`DECISIONS.md` 記錄重要決策，長篇分析才放入 `reports/`。
+- 決定：以根目錄 `README.md` 作為總覽、`TASKS.md` 作為唯一工作狀態來源、`DECISIONS.md` 記錄重要決策；設計與研究分別歸檔於 `docs/design/`、`docs/research/`。
 - 原因：保留必要的可追蹤性，同時降低工程師查找及維護文件的時間。
 - 維護原則：同一資訊只記錄一次；只寫無法由程式碼、Git 或自動化工具直接回答的內容。
 - 重新評估：團隊規模或交付流程變得無法由目前結構支援時。
@@ -18,7 +18,7 @@
 - 現況：目前只有程序內本地工具原型；標準 MCP 與 DLL 插件機制尚未實作，也尚未排入近期工作。
 - 影響：未來需要統一工具目錄、來源 adapter、雙向協定邊界，以及獨立的對外授權政策。
 - 重新評估：開始設計插件契約或確定第一個合作方 MCP Server 時，評估實作順序與最小範圍。
-- 參考：[MCP 對接差異報告](reports/MCP_INTEGRATION_GAP.md)。
+- 參考：[MCP 對接差異報告](../research/MCP_INTEGRATION_GAP.md)。
 
 ## DEC-003 先建立對話資料庫，不同時實作長期記憶
 
@@ -27,7 +27,7 @@
 - 原因：先驗證對話延續與資料庫生命週期，避免把「記憶」一次擴大成抽取、分類、覆寫及向量平台。
 - 範圍：四表為 `SchemaMigrations`、`Users`、`ConversationMessages`、`MemoryItems`；沒有 Profile 或 Session 資料表。
 - 重新評估：對話上下文穩定後，再逐項決定長期記憶寫入、敏感資料與搜尋規則。
-- 參考：[使用者記憶設計（精簡版 V1）](reports/USER_MEMORY_DESIGN.md)。
+- 參考：[使用者記憶設計（精簡版 V1）](../design/USER_MEMORY_DESIGN.md)。
 
 ## DEC-004 對話為預設路徑，工具需求才攔截
 

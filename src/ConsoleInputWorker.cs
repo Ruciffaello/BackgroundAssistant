@@ -15,6 +15,13 @@ public class ConsoleInputWorker : InputWorkerBase
 
     private readonly IHostApplicationLifetime _appLifetime;
 
+    /// <summary>
+    /// 初始化 <see cref="ConsoleInputWorker"/> 的新執行個體。
+    /// </summary>
+    /// <param name="logger">記錄器實例。</param>
+    /// <param name="globalState">全域狀態服務。</param>
+    /// <param name="appLifetime">應用程式生命週期管理。</param>
+    /// <param name="cleanTextChannel">CleanText 文字通道。</param>
     public ConsoleInputWorker(
         ILogger<ConsoleInputWorker> logger,
         GlobalStateService globalState,
@@ -25,6 +32,10 @@ public class ConsoleInputWorker : InputWorkerBase
         _appLifetime = appLifetime;
     }
 
+    /// <summary>
+    /// 背景執行迴圈：監聽終端機鍵盤輸入並分派指令或處理結束動作。
+    /// </summary>
+    /// <param name="stoppingToken">取消語彙基元。</param>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         Logger.LogInformation("Console Input Worker (CMD) started. You can type commands directly. (Type 'exit' to quit)");

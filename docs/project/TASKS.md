@@ -11,8 +11,8 @@
 - 說明：固定使用者 `local-default` 的完整回合寫入 SQLite；回答前用 BM25 從最近兩輪選取相關上下文。
 - 完成條件：CMD 與 STT 共用流程；無關回合不加入 Prompt；相關回合可延續對話；不超過模型 token 預算。
 - 範圍限制：不包含長期記憶抽取、Profile、安全確認、embedding、向量資料庫、TurnId 或聲紋。
-- 規格：[使用者記憶設計（精簡版 V1）](reports/USER_MEMORY_DESIGN.md)。
-- 驗收：[使用者記憶第一版驗收清單](reports/USER_MEMORY_VERIFICATION.md)。
+- 規格：[使用者記憶設計（精簡版 V1）](../design/USER_MEMORY_DESIGN.md)。
+- 驗收：[使用者記憶第一版驗收清單](../testing/USER_MEMORY_VERIFICATION.md)。
 - 已完成部分：四表 migration、完整回合寫入、最近兩輪讀取、中文字元 bigram BM25、設定式門檻與分數 log。
 - 驗證：建置成功；migration 冪等與資料讀回既有 smoke test 通過。BM25 實機案例尚待執行。
 - 下一步：依 [BM25 測試情境](../testing/BM25_TEST_SCENARIOS.md)驗證誤納入與漏納入，再校正 `MinimumBm25Score`。
@@ -59,7 +59,7 @@
 
 - 說明：目標同時具備 MCP Client／Server 能力，並可依協議使用合作方或第三方 MCP Server 工具；目前暫不進入實作。
 - 重新評估：確認第一個合作方、外部工具需求或對外提供能力的使用情境時。
-- 參考：[MCP 對接差異報告](reports/MCP_INTEGRATION_GAP.md)、[DEC-002](DECISIONS.md#dec-002-採用雙向-mcp-與-dll-插件並存的產品定位)。
+- 參考：[MCP 對接差異報告](../research/MCP_INTEGRATION_GAP.md)、[DEC-002](DECISIONS.md#dec-002-採用雙向-mcp-與-dll-插件並存的產品定位)。
 
 ## 最近完成
 
@@ -78,4 +78,4 @@
 
 - 說明：建立專案總覽、統一工作清單、重要決策紀錄與報告歸檔結構。
 - 完成：2026-08-21。
-- 驗證：文件責任已分離，專案進度可由 `PROJECT_STATUS.md` 進入並在本文件集中查找。
+- 驗證：文件責任已分離，專案進度可由根目錄 `README.md` 進入並在本文件集中查找。

@@ -2,14 +2,22 @@ using Microsoft.Data.Sqlite;
 
 namespace BackgroundAssistant.Memory;
 
+/// <summary>
+/// 單一對話回合資料記錄（包含使用者發言與助理回覆）。
+/// </summary>
+/// <param name="UserText">使用者發言內容。</param>
+/// <param name="AssistantText">助理回覆內容。</param>
 public sealed record ConversationTurn(string UserText, string AssistantText);
 
 /// <summary>
-/// Owns the small SQLite database used by conversation context and future explicit memories.
-/// No memory extraction or retrieval policy belongs in this class.
+/// 管理對話歷史與記憶的 SQLite 資料庫存取層。
+/// 負責建立 Schema Migration、使用者資料表、歷史回合記錄以及 MemoryItems 資料表結構。
 /// </summary>
 public sealed class AgentMemoryDatabase
 {
+    /// <summary>
+    /// 預設本機使用者識別碼。
+    /// </summary>
     public const string LocalUserId = "local-default";
 
     private readonly string _connectionString;
@@ -46,6 +54,11 @@ public sealed class AgentMemoryDatabase
             """)
     ];
 
+    /// <summary>
+    /// 初始化 <see cref="AgentMemoryDatabase"/> 的新執行個體，並自動執行資料庫初始化與 Migration。
+    /// </summary>
+    /// <param name="configuration">應用程式組態設定。</param>
+    /// <param name="logger">記錄器實例。</param>
     public AgentMemoryDatabase(IConfiguration configuration, ILogger<AgentMemoryDatabase> logger)
     {
         _logger = logger;
@@ -54,6 +67,12 @@ public sealed class AgentMemoryDatabase
         Initialize();
     }
 
+    /// <summary>
+    /// 取得指定使用者最近的 N 筆對話回合（按時間順序由舊至新排列）。
+    /// </summary>
+    /// <param name="userId">使用者識別碼。</param>
+    /// <param name="count">欲讀取的回合數量上限。</param>
+    /// <returns>對話回合清單。</returns>
     public IReadOnlyList<ConversationTurn> GetRecentTurns(string userId, int count)
     {
         using SqliteConnection connection = OpenConnection();
@@ -78,6 +97,12 @@ public sealed class AgentMemoryDatabase
         return turns;
     }
 
+    /// <summary>
+    /// 將單一對話回合新增寫入 SQLite 資料庫中。
+    /// </summary>
+    /// <param name="userId">使用者識別碼。</param>
+    /// <param name="userText">使用者發言文字。</param>
+    /// <param name="assistantText">助理回覆文字。</param>
     public void AddTurn(string userId, string userText, string assistantText)
     {
         if (string.IsNullOrWhiteSpace(userText) || string.IsNullOrWhiteSpace(assistantText)) return;
@@ -95,6 +120,9 @@ public sealed class AgentMemoryDatabase
         command.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// 初始化資料庫，包含建立版本遷移表記錄、依序套用 Migration 並插入預設使用者。
+    /// </summary>
     private void Initialize()
     {
         using SqliteConnection connection = OpenConnection();
@@ -152,6 +180,10 @@ public sealed class AgentMemoryDatabase
         user.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// 開啟 SQLite 連線並啟用外鍵約束與 Busy 逾時設定。
+    /// </summary>
+    /// <returns>已開啟的 <see cref="SqliteConnection"/>。</returns>
     private SqliteConnection OpenConnection()
     {
         var connection = new SqliteConnection(_connectionString);

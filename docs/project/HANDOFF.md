@@ -1,4 +1,4 @@
-# BackgroundAssistant 目前工作狀態
+# BackgroundAssistant 專案交接紀錄
 
 > 更新日期：2026-08-25  
 > 工作目錄：`D:\C#\20260505_mcp\BackgroundAssistant`  
@@ -181,7 +181,7 @@ ripgrep 的設計是在遇到任何 IO/權限錯誤時，即使正常列舉了�
 
 ## 五、下一次開工順序
 
-1. 檔案搜尋功能已由實機（`CURRENT_HANDOFF.md`）與單元測試（12/12）驗證通過。
+1. 檔案搜尋功能已由實機與單元測試（12/12）驗證通過。
 2. 檢查 `git status`，確認所有新增的 Plugin 專案、測試與修改。
 3. 執行 Git Commit 與 Push。
 4. 繼續進行後續排定功能（如 BM25 門檻實機調優或長期記憶最小流程設計）。
@@ -209,7 +209,7 @@ src/PluginContracts/
 src/PluginRuntime/
 src/Plugins/
 tests/FileSearchTool.Tests/
-CURRENT_HANDOFF.md
+docs/project/HANDOFF.md
 ```
 
 不要在未檢查差異前使用 `git reset --hard` 或覆蓋這些檔案。
@@ -225,5 +225,5 @@ CURRENT_HANDOFF.md
 若進入全新 Codex 對話，第一句可使用：
 
 ```text
-請先閱讀根目錄 CURRENT_HANDOFF.md、檢查 git status，然後告訴我目前進度與下一步。
+請先閱讀根目錄 README.md、docs/project/HANDOFF.md，檢查 git status，然後告訴我目前進度與下一步。
 ```

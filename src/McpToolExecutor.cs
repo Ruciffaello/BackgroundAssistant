@@ -2,6 +2,7 @@ using System.Threading.Channels;
 using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 using BackgroundAssistant.Tools;
 using BackgroundAssistant.Memory;
 using BackgroundAssistant.PluginRuntime;
@@ -11,7 +12,7 @@ namespace BackgroundAssistant;
 
 /// <summary>
 /// 第四階段：執行 (Executor/Hands) - 工具執行工作者。
-/// 負責解析 JSON 指令並分派給對應的 IMcpTool 實作執行，將結果字串寫入 ExecutionResult 通道。
+/// 負責解析 JSON 指令並分派給對應的 IMcpTool 實作或 DLL 插件執行，將結果字串寫入 ExecutionResult 通道。
 /// </summary>
 public class McpToolExecutor : BackgroundService
 {
@@ -24,6 +25,17 @@ public class McpToolExecutor : BackgroundService
     private readonly LazyDllToolLoader _dllToolLoader;
     private readonly GlobalStateService _globalState;
 
+    /// <summary>
+    /// 初始化 <see cref="McpToolExecutor"/> 的新執行個體。
+    /// </summary>
+    /// <param name="logger">記錄器實例。</param>
+    /// <param name="jsonCommandChannel">JSON 指令通道。</param>
+    /// <param name="executionResultChannel">執行結果文字通道。</param>
+    /// <param name="recentConversation">最近對話服務。</param>
+    /// <param name="toolManifestCatalog">插件資訊清單目錄。</param>
+    /// <param name="dllToolLoader">DLL 工具延遲載入器。</param>
+    /// <param name="globalState">全域狀態服務。</param>
+    /// <param name="tools">內建靜態 IMcpTool 集合。</param>
     public McpToolExecutor(
         ILogger<McpToolExecutor> logger, 
         [FromKeyedServices("JsonCommand")] Channel<string> jsonCommandChannel,
@@ -44,6 +56,10 @@ public class McpToolExecutor : BackgroundService
         _tools = tools;
     }
 
+    /// <summary>
+    /// 背景執行迴圈：從 JsonCommand 讀取指令，分派至對應工具執行，並將輸出結果送往 TTS 或重設為閒置狀態。
+    /// </summary>
+    /// <param name="stoppingToken">取消語彙基元。</param>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("MCP Tool Executor (Hands) starting with {count} tools loaded...", _tools.Count());

@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -13,8 +13,17 @@ public class SystemTools : IMcpTool
     private readonly IHostApplicationLifetime _appLifetime;
     private readonly Services.GlobalStateService _globalState;
 
+    /// <summary>
+    /// 工具唯一識別名稱。
+    /// </summary>
     public string Name => "system_control";
 
+    /// <summary>
+    /// 初始化 <see cref="SystemTools"/> 的新執行個體。
+    /// </summary>
+    /// <param name="logger">記錄器實例。</param>
+    /// <param name="appLifetime">應用程式生命週期控制。</param>
+    /// <param name="globalState">全域狀態服務。</param>
     public SystemTools(
         ILogger<SystemTools> logger,
         IHostApplicationLifetime appLifetime,
@@ -25,6 +34,11 @@ public class SystemTools : IMcpTool
         _globalState = globalState;
     }
 
+    /// <summary>
+    /// 執行系統控制指令（觸發優雅關閉流程，並等待當前語音播報結束後終止程式）。
+    /// </summary>
+    /// <param name="root">JSON 參數元素。</param>
+    /// <returns>告別語音播報文字。</returns>
     public Task<string> ExecuteAsync(JsonElement root)
     {
         _logger.LogInformation("SystemTools: Shutdown requested.");

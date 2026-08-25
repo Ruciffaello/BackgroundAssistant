@@ -38,6 +38,10 @@ public class Phi35ModelService : IPhi35ModelService, IDisposable
 
     private const string ModelFolderPath = "D:/models/Phi-3.5-mini-instruct-onnx";
 
+    /// <summary>
+    /// 初始化 <see cref="Phi35ModelService"/> 的新執行個體，載入共享的 ONNX 模型。
+    /// </summary>
+    /// <param name="logger">記錄器實例。</param>
     public Phi35ModelService(ILogger<Phi35ModelService> logger)
     {
         _logger = logger;
@@ -69,6 +73,9 @@ public class Phi35ModelService : IPhi35ModelService, IDisposable
         }
     }
 
+    /// <summary>
+    /// 釋放 Tokenizer 與 Model 之 Unmanaged 原生資源。
+    /// </summary>
     public void Dispose()
     {
         Tokenizer?.Dispose();

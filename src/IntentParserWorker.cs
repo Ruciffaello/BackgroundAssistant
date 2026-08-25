@@ -8,11 +8,14 @@ using BackgroundAssistant.PluginRuntime;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.ML.OnnxRuntimeGenAI;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace BackgroundAssistant;
 
 /// <summary>
-/// 對話／工具路由器：一般輸入直接對話，只有明確工具需求才產生工具命令。
+/// 第三階段：解析與決策 (Router/Brain) - 對話與工具路由器。
+/// 一般輸入直接生成對話回覆，只有明確工具需求時才產生工具 JSON 命令分派至 JsonCommand 通道。
 /// </summary>
 public class IntentParserWorker : BackgroundService
 {
@@ -35,6 +38,19 @@ public class IntentParserWorker : BackgroundService
     private readonly int _contextLimit;
     private readonly double _answerRepetitionPenalty;
 
+    /// <summary>
+    /// 初始化 <see cref="IntentParserWorker"/> 的新執行個體。
+    /// </summary>
+    /// <param name="logger">記錄器實例。</param>
+    /// <param name="configuration">應用程式組態。</param>
+    /// <param name="modelService">共享的 Phi-3.5 模型服務。</param>
+    /// <param name="pinyinService">拼音校正服務。</param>
+    /// <param name="recentConversation">最近對話服務。</param>
+    /// <param name="tools">內建靜態 IMcpTool 集合。</param>
+    /// <param name="toolManifestCatalog">插件目錄管理員。</param>
+    /// <param name="cleanTextChannel">CleanText 核心文字通道。</param>
+    /// <param name="jsonCommandChannel">JsonCommand 工具指令通道。</param>
+    /// <param name="executionResultChannel">ExecutionResult 執行與對話回應通道。</param>
     public IntentParserWorker(
         ILogger<IntentParserWorker> logger,
         IConfiguration configuration,
@@ -69,6 +85,10 @@ public class IntentParserWorker : BackgroundService
             : 1.1d;
     }
 
+    /// <summary>
+    /// 背景執行迴圈：讀取 CleanText 文字，注入歷史對話上下文，透過 LLM 路由器決策走向一般聊天或工具指令分派。
+    /// </summary>
+    /// <param name="stoppingToken">取消語彙基元。</param>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Decision Router starting with a {limit}-token context limit...", _contextLimit);
@@ -127,6 +147,12 @@ public class IntentParserWorker : BackgroundService
         }
     }
 
+    /// <summary>
+    /// 調用 LLM 路由器進行意圖分析，判斷為一般對話或是特定工具調用。
+    /// </summary>
+    /// <param name="text">使用者輸入文字。</param>
+    /// <param name="ct">取消語彙基元。</param>
+    /// <returns>路由器決策結果 <see cref="RouterDecision"/>。</returns>
     private async Task<RouterDecision> DecideAsync(string text, CancellationToken ct)
     {
         string systemPrompt = _configuration["PromptSettings:DecisionRouter:SystemPrompt"] ?? "";
@@ -191,6 +217,13 @@ public class IntentParserWorker : BackgroundService
         }
     }
 
+    /// <summary>
+    /// 調用 LLM 生成一般聊天回覆並輸出至回應通道。
+    /// </summary>
+    /// <param name="text">包含上下文的使用者輸入。</param>
+    /// <param name="promptSection">組態中的 Prompt 設定區段名稱。</param>
+    /// <param name="outputLabel">Console 輸出的標籤名稱。</param>
+    /// <param name="ct">取消語彙基元。</param>
     private async Task WriteResponseAsync(
         string text,
         string promptSection,
@@ -215,6 +248,11 @@ public class IntentParserWorker : BackgroundService
         await WriteFinalTextAsync(answer, ct);
     }
 
+    /// <summary>
+    /// 將路由器決策的工具 JSON 指令進行拼音校正並寫入 JsonCommand 通道。
+    /// </summary>
+    /// <param name="decision">路由器決策結果。</param>
+    /// <param name="ct">取消語彙基元。</param>
     private async Task DispatchToolAsync(RouterDecision decision, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(decision.CommandJson) ||
@@ -231,12 +269,23 @@ public class IntentParserWorker : BackgroundService
         await _jsonCommandWriter.WriteAsync(commandJson, ct);
     }
 
+    /// <summary>
+    /// 將最終文字回覆寫入 ExecutionResult 通道並通知對話記憶服務完成回合。
+    /// </summary>
+    /// <param name="text">回覆文字。</param>
+    /// <param name="ct">取消語彙基元。</param>
     private async Task WriteFinalTextAsync(string text, CancellationToken ct)
     {
         await _answerWriter.WriteAsync(text, ct);
         _recentConversation.CompleteTurn(text);
     }
 
+    /// <summary>
+    /// 將歷史對話上下文與當前輸入合併為完整 Prompt 輸入文字。
+    /// </summary>
+    /// <param name="currentInput">當前輸入。</param>
+    /// <param name="recentContext">歷史對話上下文。</param>
+    /// <returns>合併後的輸入字串。</returns>
     private static string AddRecentContext(string currentInput, string recentContext)
     {
         return string.IsNullOrWhiteSpace(recentContext)
@@ -244,6 +293,14 @@ public class IntentParserWorker : BackgroundService
             : $"以下是先前對話，只用來理解上下文：\n{recentContext}\n\n目前使用者輸入（請以這句為主）：\n{currentInput}";
     }
 
+    /// <summary>
+    /// 在 Token 預算限制內動態構建 Prompt，必要時自動縮減使用者輸入長度以防超出 Context Window。
+    /// </summary>
+    /// <param name="systemPrompt">系統提示詞。</param>
+    /// <param name="userTemplate">使用者樣板。</param>
+    /// <param name="inputText">輸入文字內容。</param>
+    /// <param name="reservedOutputTokens">預留給輸出的 Token 數量。</param>
+    /// <returns>編碼合規的 Prompt 字串。</returns>
     private string BuildPromptWithinBudget(
         string systemPrompt,
         string userTemplate,
@@ -282,6 +339,14 @@ public class IntentParserWorker : BackgroundService
         }
     }
 
+    /// <summary>
+    /// 執行 ONNX GenAI 模型推論，支援 Repetition Penalty、動態長度截斷與結束符號偵測。
+    /// </summary>
+    /// <param name="prompt">完整的輸入 Prompt。</param>
+    /// <param name="reservedOutputTokens">最多生成的 Output Token 數。</param>
+    /// <param name="ct">取消語彙基元。</param>
+    /// <param name="repetitionPenalty">重複懲罰係數。</param>
+    /// <returns>模型生成的文字內容。</returns>
     private async Task<string> RunInferenceAsync(
         string prompt,
         int reservedOutputTokens,
@@ -347,6 +412,12 @@ public class IntentParserWorker : BackgroundService
         }
     }
 
+    /// <summary>
+    /// 嘗試從模型輸出字串中提取合法的 JSON 物件。
+    /// </summary>
+    /// <param name="text">模型輸出字串。</param>
+    /// <param name="document">解析成功的 JsonDocument。</param>
+    /// <returns>若成功解析出 JSON 物件則回傳 true，否則為 false。</returns>
     private static bool TryExtractJson(string text, out JsonDocument document)
     {
         document = null!;
@@ -373,6 +444,11 @@ public class IntentParserWorker : BackgroundService
         }
     }
 
+    /// <summary>
+    /// 清理模型回覆文字中的標記符號（如 [CLEAN]、[END]、&lt;|end|&gt; 等）。
+    /// </summary>
+    /// <param name="text">原始文字。</param>
+    /// <returns>清理後的純文字。</returns>
     private static string CleanModelText(string text)
     {
         return text
@@ -382,6 +458,12 @@ public class IntentParserWorker : BackgroundService
             .Trim();
     }
 
+    /// <summary>
+    /// 偵測並修剪模型生成過程中的重複後綴跳針字句。
+    /// </summary>
+    /// <param name="text">當前生成的文字。</param>
+    /// <param name="trimmed">修剪後的文字。</param>
+    /// <returns>若偵測到重複跳針並完成修剪則回傳 true，否則為 false。</returns>
     private static bool TryTrimRepeatedSuffix(string text, out string trimmed)
     {
         const int repetitions = 4;
@@ -413,6 +495,13 @@ public class IntentParserWorker : BackgroundService
         return false;
     }
 
+    /// <summary>
+    /// 路由器決策記錄。
+    /// </summary>
+    /// <param name="Mode">決策模式（"conversation" 或 "tool"）。</param>
+    /// <param name="Subject">主題摘要。</param>
+    /// <param name="Tool">若為工具模式，代表工具名稱。</param>
+    /// <param name="CommandJson">若為工具模式，代表工具執行的完整 JSON 字串。</param>
     private sealed record RouterDecision(
         string Mode,
         string Subject,

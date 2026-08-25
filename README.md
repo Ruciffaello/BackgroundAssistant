@@ -1,4 +1,4 @@
-# BackgroundAssistant 專案狀態
+# BackgroundAssistant
 
 本文件是專案總覽與文件入口。詳細工作狀態統一記錄於 [TASKS.md](docs/project/TASKS.md)。
 
@@ -71,8 +71,9 @@ CMD 輸入 ----------------------------------+                  |
 | [TASKS.md](docs/project/TASKS.md) | 工作狀態唯一來源 |
 | [DECISIONS.md](docs/project/DECISIONS.md) | 重要架構決策 |
 | [docs/README.md](docs/README.md) | 完整文件分類與索引 |
-| [PARSER_REDESIGN.md](docs/project/reports/PARSER_REDESIGN.md) | 現行 Router 規格 |
-| [USER_MEMORY_DESIGN.md](docs/project/reports/USER_MEMORY_DESIGN.md) | 對話資料與未來記憶邊界 |
+| [PARSER_REDESIGN.md](docs/design/PARSER_REDESIGN.md) | 現行 Router 規格 |
+| [USER_MEMORY_DESIGN.md](docs/design/USER_MEMORY_DESIGN.md) | 對話資料與未來記憶邊界 |
+| [HANDOFF.md](docs/project/HANDOFF.md) | 最近一次開發交接紀錄 |
 | [BM25_TEST_SCENARIOS.md](docs/testing/BM25_TEST_SCENARIOS.md) | Router 與 BM25 人工測試劇本 |
 | [TEST_GUIDE.md](docs/testing/TEST_GUIDE.md) | 一般人工測試方式 |
 | [CHANGELOG.md](CHANGELOG.md) | 正式變更歷史 |

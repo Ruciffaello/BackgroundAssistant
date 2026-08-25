@@ -1,4 +1,4 @@
-﻿using System.Threading.Channels;
+using System.Threading.Channels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -15,12 +15,21 @@ namespace BackgroundAssistant;
 /// </summary>
 public class SpeechToTextWorker : InputWorkerBase
 {
+    /// <summary>
+    /// 輸入來源識別名稱。
+    /// </summary>
     public override string SourceName => "STT";
     
     // 模型路徑 (已更新為官方 SherpaOnnx 模型路徑)
     private const string ModelPath = "D:/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.onnx";
     private const string TokensPath = "D:/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/tokens.txt";
 
+    /// <summary>
+    /// 初始化 <see cref="SpeechToTextWorker"/> 的新執行個體。
+    /// </summary>
+    /// <param name="logger">記錄器實例。</param>
+    /// <param name="globalState">全域狀態服務。</param>
+    /// <param name="rawTextChannel">RawText 通道實例。</param>
     public SpeechToTextWorker(
         ILogger<SpeechToTextWorker> logger, 
         GlobalStateService globalState,

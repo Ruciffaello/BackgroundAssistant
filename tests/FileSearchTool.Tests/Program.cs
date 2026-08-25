@@ -205,12 +205,12 @@ static async Task BrokenUpdateKeepsPreviousAsync()
 static async Task WholeDriveSearchExistingFileAsync()
 {
     var tool = new FileSearchTool();
-    using var arguments = JsonDocument.Parse("""{"fileName":"CURRENT_HANDOFF.md"}""");
+    using var arguments = JsonDocument.Parse("""{"fileName":"README.md"}""");
 
     var result = await tool.ExecuteAsync(arguments.RootElement, default);
 
     True(result.Success, "全磁碟搜尋存在檔案應回傳成功。");
-    True(result.Content.Contains("CURRENT_HANDOFF.md", StringComparison.OrdinalIgnoreCase), "結果應包含 CURRENT_HANDOFF.md 路徑。");
+    True(result.Content.Contains("README.md", StringComparison.OrdinalIgnoreCase), "結果應包含 README.md 路徑。");
 }
 
 static async Task WholeDriveSearchNonexistentFileAsync()

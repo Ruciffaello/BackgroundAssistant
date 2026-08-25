@@ -4,6 +4,10 @@ using BackgroundAssistant.PluginContracts;
 
 namespace BackgroundAssistant.FileSearch;
 
+/// <summary>
+/// 基於 ripgrep (rg) 的本機檔案搜尋工具插件。
+/// 支援完整檔名優先比對、包含相符 fallback、中文與特殊字元路徑，結果直接在介面顯示不透過 TTS 朗讀。
+/// </summary>
 public sealed class FileSearchTool : IAgentTool
 {
     private const string InputSchema = """
@@ -22,22 +26,38 @@ public sealed class FileSearchTool : IAgentTool
 
     private readonly RipgrepFileSearcher _searcher;
 
+    /// <summary>
+    /// 初始化 <see cref="FileSearchTool"/> 的新執行個體，使用系統預設組態（全磁碟搜尋、15 秒逾時）。
+    /// </summary>
     public FileSearchTool()
         : this(new FileSearchOptions())
     {
     }
 
+    /// <summary>
+    /// 初始化 <see cref="FileSearchTool"/> 的新執行個體，使用自訂組態選項。
+    /// </summary>
+    /// <param name="options">檔案搜尋選項。</param>
     public FileSearchTool(FileSearchOptions options)
     {
         _searcher = new RipgrepFileSearcher(options);
     }
 
+    /// <summary>
+    /// 取得工具描述中繼資料。
+    /// </summary>
     public ToolDescriptor Descriptor { get; } = new(
         "file_search",
         "依照檔名搜尋電腦中的檔案；先使用完整檔名，找不到才回傳名稱包含結果。",
         InputSchema,
         SpeakResult: false);
 
+    /// <summary>
+    /// 非同步執行檔案搜尋指令。
+    /// </summary>
+    /// <param name="arguments">包含 fileName 欄位的 JSON 參數。</param>
+    /// <param name="cancellationToken">取消操作語彙基元。</param>
+    /// <returns>回傳包含搜尋路徑結果的 <see cref="ToolResult"/>。</returns>
     public async Task<ToolResult> ExecuteAsync(
         JsonElement arguments,
         CancellationToken cancellationToken)

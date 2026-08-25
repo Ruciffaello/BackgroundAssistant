@@ -112,6 +112,9 @@ public class PinyinCorrectionService
     /// 計算編輯距離 (Levenshtein Distance)。
     /// 演算法優化版：僅使用兩個陣列進行空間壓縮，適合頻繁調用。
     /// </summary>
+    /// <param name="s">來源字串。</param>
+    /// <param name="t">目標字串。</param>
+    /// <returns>兩字串間的最小編輯次數。</returns>
     private static int ComputeLevenshteinDistance(string s, string t)
     {
         int n = s.Length;

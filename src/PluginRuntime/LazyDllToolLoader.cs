@@ -5,27 +5,56 @@ using BackgroundAssistant.PluginContracts;
 
 namespace BackgroundAssistant.PluginRuntime;
 
+/// <summary>
+/// DLL 插件工具執行成果記錄。
+/// </summary>
+/// <param name="Result">工具執行回傳的 <see cref="ToolResult"/>。</param>
+/// <param name="SpeakResult">執行結果是否需送入 TTS 朗讀。</param>
+/// <param name="LoadedNewVersion">此次呼叫是否載入了新版本的 DLL。</param>
+/// <param name="ReloadWarning">若新版 DLL 載入失敗而回退至舊版時的警告訊息。</param>
 public sealed record DllToolExecution(
     ToolResult Result,
     bool SpeakResult,
     bool LoadedNewVersion,
     string? ReloadWarning = null);
 
+/// <summary>
+/// 延遲（按需）載入 DLL 工具的載入器與執行器。
+/// 支援 SHA-256 雜湊指紋比對、影子副本防檔案鎖定、可回收 ALC 隔離以及損壞回退機制。
+/// </summary>
 public sealed class LazyDllToolLoader : IAsyncDisposable
 {
     private readonly ToolManifestCatalog _catalog;
     private readonly string _cacheRootDirectory;
     private readonly ConcurrentDictionary<string, ToolSlot> _slots = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// 初始化 <see cref="LazyDllToolLoader"/> 的新執行個體。
+    /// </summary>
+    /// <param name="catalog">插件資訊清單目錄管理員。</param>
+    /// <param name="cacheRootDirectory">用於存放 DLL 影子副本快取的根目錄路徑。</param>
     public LazyDllToolLoader(ToolManifestCatalog catalog, string cacheRootDirectory)
     {
         _catalog = catalog;
         _cacheRootDirectory = Path.GetFullPath(cacheRootDirectory);
     }
 
+    /// <summary>
+    /// 檢查指定的工具目前是否已經被載入至記憶體中。
+    /// </summary>
+    /// <param name="toolName">工具唯一名稱。</param>
+    /// <returns>若已載入實例則回傳 true，否則為 false。</returns>
     public bool IsLoaded(string toolName) =>
         _slots.TryGetValue(toolName, out var slot) && slot.Loaded is not null;
 
+    /// <summary>
+    /// 非同步執行指定的 DLL 工具。若尚未載入或 DLL 檔案已變更，會自動進行指紋比對並按需載入。
+    /// </summary>
+    /// <param name="toolName">工具唯一名稱。</param>
+    /// <param name="arguments">Router 解析的 JSON 參數。</param>
+    /// <param name="cancellationToken">取消操作的語彙基元。</param>
+    /// <returns>包含執行結果與版本資訊的 <see cref="DllToolExecution"/> 物件。</returns>
+    /// <exception cref="PluginLoadException">當找不到工具或首次載入失敗時擲出。</exception>
     public async Task<DllToolExecution> ExecuteAsync(
         string toolName,
         System.Text.Json.JsonElement arguments,
@@ -108,6 +137,9 @@ public sealed class LazyDllToolLoader : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// 非同步釋放所有已載入之插件 ALC 與並行控制鎖。
+    /// </summary>
     public ValueTask DisposeAsync()
     {
         foreach (var slot in _slots.Values)
@@ -120,6 +152,12 @@ public sealed class LazyDllToolLoader : IAsyncDisposable
         return ValueTask.CompletedTask;
     }
 
+    /// <summary>
+    /// 透過影子副本與 Reflection 實體化目標 Tool 組件。
+    /// </summary>
+    /// <param name="registration">插件註冊資訊。</param>
+    /// <param name="fingerprint">來源 DLL 的 SHA-256 雜湊指紋。</param>
+    /// <returns>已載入並驗證完成的 <see cref="LoadedTool"/> 物件。</returns>
     private LoadedTool LoadTool(ToolManifestRegistration registration, string fingerprint)
     {
         var cacheDirectory = Path.Combine(
@@ -189,6 +227,12 @@ public sealed class LazyDllToolLoader : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// 計算來源組件檔案的 SHA-256 雜湊值作為指紋。
+    /// </summary>
+    /// <param name="assemblyPath">組件 DLL 檔案路徑。</param>
+    /// <param name="cancellationToken">取消操作語彙基元。</param>
+    /// <returns>16 進位字串格式的 SHA-256 雜湊值。</returns>
     private static async Task<string> ComputeFingerprintAsync(
         string assemblyPath,
         CancellationToken cancellationToken)
@@ -215,6 +259,11 @@ public sealed class LazyDllToolLoader : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// 以不可部分完成 (Atomic) 的方式將來源 DLL 複製至影子快取目錄（若快取檔案已存在則直接略過）。
+    /// </summary>
+    /// <param name="sourcePath">來源 DLL 路徑。</param>
+    /// <param name="destinationPath">快取目標路徑。</param>
     private static void CopyAtomicallyIfMissing(string sourcePath, string destinationPath)
     {
         if (File.Exists(destinationPath))
@@ -247,6 +296,11 @@ public sealed class LazyDllToolLoader : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// 判斷例外是否屬於可復原的載入失敗（若可復原，將嘗試回退至舊版已載入實例）。
+    /// </summary>
+    /// <param name="exception">發生的例外物件。</param>
+    /// <returns>若為可復原錯誤則回傳 true，否則為 false。</returns>
     private static bool IsRecoverableLoadFailure(Exception exception) => exception is
         PluginLoadException or
         BadImageFormatException or
@@ -257,6 +311,9 @@ public sealed class LazyDllToolLoader : IAsyncDisposable
         TypeLoadException or
         TargetInvocationException;
 
+    /// <summary>
+    /// 單一工具的插槽狀態，包含並行控制訊號量與當前載入實例。
+    /// </summary>
     private sealed class ToolSlot
     {
         public SemaphoreSlim Gate { get; } = new(1, 1);
@@ -264,6 +321,9 @@ public sealed class LazyDllToolLoader : IAsyncDisposable
         public LoadedTool? Loaded { get; set; }
     }
 
+    /// <summary>
+    /// 已載入插件的封裝資料，包含指紋、Tool 實例與其所屬的 AssemblyLoadContext。
+    /// </summary>
     private sealed record LoadedTool(
         string Fingerprint,
         IAgentTool Tool,

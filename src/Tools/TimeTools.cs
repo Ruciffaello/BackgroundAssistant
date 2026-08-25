@@ -8,8 +8,16 @@ namespace BackgroundAssistant.Tools;
 /// </summary>
 public class TimeTools : IMcpTool
 {
+    /// <summary>
+    /// 工具唯一識別名稱。
+    /// </summary>
     public string Name => "get_time";
 
+    /// <summary>
+    /// 依據指定的地區或本地時區，計算並格式化當前時間文字。
+    /// </summary>
+    /// <param name="root">包含 location 參數的 JSON 元素。</param>
+    /// <returns>格式化的時間播報字串。</returns>
     public async Task<string> ExecuteAsync(JsonElement root)
     {
         // 取得地點參數

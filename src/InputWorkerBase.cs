@@ -1,4 +1,4 @@
-﻿using System.Threading.Channels;
+using System.Threading.Channels;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using BackgroundAssistant.Services;
@@ -19,6 +19,12 @@ public abstract class InputWorkerBase : BackgroundService
     /// </summary>
     public abstract string SourceName { get; }
 
+    /// <summary>
+    /// 初始化 <see cref="InputWorkerBase"/> 的新執行個體。
+    /// </summary>
+    /// <param name="logger">記錄器實例。</param>
+    /// <param name="globalState">全域狀態服務。</param>
+    /// <param name="targetChannel">分派目標的 Channel。</param>
     protected InputWorkerBase(
         ILogger logger,
         GlobalStateService globalState,

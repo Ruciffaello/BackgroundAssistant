@@ -5,10 +5,24 @@ using Microsoft.Extensions.Logging;
 
 namespace BackgroundAssistant.Services;
 
+/// <summary>
+/// 熱詞指令資料模型，代表一組關鍵字及其對應的快速動作 JSON。
+/// </summary>
 public class HotwordEntry
 {
+    /// <summary>
+    /// 熱詞關鍵字（例如「關閉系統」）。
+    /// </summary>
     public string Keyword { get; set; } = "";
+
+    /// <summary>
+    /// 觸發時執行的 JSON 指令。
+    /// </summary>
     public string ActionJson { get; set; } = "";
+
+    /// <summary>
+    /// 熱詞功能說明。
+    /// </summary>
     public string Description { get; set; } = "";
 }
 
@@ -29,6 +43,11 @@ public class SqliteDatabaseService
     private const string DbPath = "assistant_data.db";
     private readonly string _connectionString = $"Data Source={DbPath}";
 
+    /// <summary>
+    /// 初始化 <see cref="SqliteDatabaseService"/> 的新執行個體，並初始化資料表與種子資料。
+    /// </summary>
+    /// <param name="logger">記錄器實例。</param>
+    /// <param name="pinyinService">拼音轉換服務。</param>
     public SqliteDatabaseService(ILogger<SqliteDatabaseService> logger, IPinyinService pinyinService)
     {
         _logger = logger;
@@ -36,6 +55,9 @@ public class SqliteDatabaseService
         InitializeDatabase();
     }
 
+    /// <summary>
+    /// 初始化 SQLite 資料庫，建立資料表並載入種子熱詞。
+    /// </summary>
     private void InitializeDatabase()
     {
         using var connection = new SqliteConnection(_connectionString);
@@ -66,6 +88,10 @@ public class SqliteDatabaseService
         _logger.LogInformation("SQLite Database initialized and synced with JSON.");
     }
 
+    /// <summary>
+    /// 檢查並升級舊版 SQLite 資料表結構。
+    /// </summary>
+    /// <param name="connection">資料庫連線。</param>
     private void UpdateLegacyData(SqliteConnection connection)
     {
         // 簡單檢查是否有欄位存在，若無則拋出異常或處理。
@@ -86,6 +112,10 @@ public class SqliteDatabaseService
         }
     }
 
+    /// <summary>
+    /// 從種子 JSON 檔案 (hotwords_initial.json) 讀取預設熱詞並同步至資料庫。
+    /// </summary>
+    /// <param name="connection">資料庫連線。</param>
     private void SyncDataFromJson(SqliteConnection connection)
     {
         const string JsonFilePath = "hotwords_initial.json";
@@ -115,6 +145,13 @@ public class SqliteDatabaseService
         }
     }
 
+    /// <summary>
+    /// 向資料庫新增單一筆熱詞及其拼音索引。
+    /// </summary>
+    /// <param name="conn">資料庫連線。</param>
+    /// <param name="keyword">熱詞關鍵字。</param>
+    /// <param name="json">對應的動作 JSON。</param>
+    /// <param name="desc">描述資訊。</param>
     private void AddHotword(SqliteConnection conn, string keyword, string json, string desc)
     {
         string pinyin = _pinyinService.GetNormalizedPinyin(keyword);
@@ -132,6 +169,8 @@ public class SqliteDatabaseService
     /// 順序：1. 字面精準匹配 -> 2. 拼音精準匹配 -> 3. 拼音模糊比對 (Levenshtein)
     /// 注意：不再使用 LIKE 進行字串內部的模糊匹配，以避免長難句中的誤判（例如「中職」誤判於長句子中）。
     /// </summary>
+    /// <param name="text">使用者輸入文字。</param>
+    /// <returns>匹配到的動作 JSON 字串，若無匹配則回傳 null。</returns>
     public string? GetActionByKeyword(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
@@ -174,6 +213,11 @@ public class SqliteDatabaseService
         return null;
     }
 
+    /// <summary>
+    /// 讀取資料庫中所有熱詞的拼音與動作 JSON。
+    /// </summary>
+    /// <param name="conn">資料庫連線。</param>
+    /// <returns>熱詞拼音與動作 JSON 的元組清單。</returns>
     private List<(string Pinyin, string ActionJson)> GetAllHotwords(SqliteConnection conn)
     {
         var list = new List<(string, string)>();
@@ -186,6 +230,12 @@ public class SqliteDatabaseService
         return list;
     }
 
+    /// <summary>
+    /// 計算兩字串之 Levenshtein 編輯距離。
+    /// </summary>
+    /// <param name="s">來源字串。</param>
+    /// <param name="t">目標字串。</param>
+    /// <returns>編輯距離數值。</returns>
     private static int ComputeLevenshteinDistance(string s, string t)
     {
         int n = s.Length; int m = t.Length;
@@ -203,6 +253,13 @@ public class SqliteDatabaseService
         return v0[m];
     }
 
+    /// <summary>
+    /// 執行參數化 SQL 查詢並回傳單一動作 JSON。
+    /// </summary>
+    /// <param name="conn">資料庫連線。</param>
+    /// <param name="sql">SQL 查詢字串。</param>
+    /// <param name="paramValue">參數數值。</param>
+    /// <returns>動作 JSON 字串，若查無結果則為 null。</returns>
     private string? QueryAction(SqliteConnection conn, string sql, string paramValue)
     {
         using var command = new SqliteCommand(sql, conn);

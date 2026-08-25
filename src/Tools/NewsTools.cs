@@ -14,8 +14,16 @@ public class NewsTools : IMcpTool
     private readonly ILogger<NewsTools> _logger;
     private readonly HttpClient _httpClient;
 
+    /// <summary>
+    /// 工具唯一識別名稱。
+    /// </summary>
     public string Name => "news_search";
 
+    /// <summary>
+    /// 初始化 <see cref="NewsTools"/> 的新執行個體。
+    /// </summary>
+    /// <param name="configuration">應用程式組態。</param>
+    /// <param name="logger">記錄器實例。</param>
     public NewsTools(IConfiguration configuration, ILogger<NewsTools> logger)
     {
         _configuration = configuration;
@@ -24,6 +32,11 @@ public class NewsTools : IMcpTool
         _httpClient.DefaultRequestHeaders.Add("User-Agent", "BackgroundAssistant/1.0");
     }
 
+    /// <summary>
+    /// 透過 NewsAPI 非同步執行新聞搜尋（先頭條後全網）。
+    /// </summary>
+    /// <param name="root">包含 query 關鍵字的 JSON 參數。</param>
+    /// <returns>格式化後的新聞標題摘要字串。</returns>
     public async Task<string> ExecuteAsync(JsonElement root)
     {
         string query = root.TryGetProperty("query", out var q) ? q.GetString()! : "";
@@ -85,6 +98,13 @@ public class NewsTools : IMcpTool
         }
     }
 
+    /// <summary>
+    /// 將 NewsAPI 回傳的文章列表格式化為易於播報的文字摘要。
+    /// </summary>
+    /// <param name="query">搜尋關鍵字。</param>
+    /// <param name="articles">新聞文章 JSON 陣列。</param>
+    /// <param name="sourceTag">來源標籤（今日頭條/全網最新消息）。</param>
+    /// <returns>格式化文字。</returns>
     private string FormatResult(string query, JsonElement articles, string sourceTag)
     {
         string result = $"幫您找到了關於「{query}」的{sourceTag}：\n\n";

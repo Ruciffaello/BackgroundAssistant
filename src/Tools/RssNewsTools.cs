@@ -14,8 +14,15 @@ public class RssNewsTools : IMcpTool
     private readonly ILogger<RssNewsTools> _logger;
     private readonly HttpClient _httpClient;
 
+    /// <summary>
+    /// 工具唯一識別名稱。
+    /// </summary>
     public string Name => "rss_news_search";
 
+    /// <summary>
+    /// 初始化 <see cref="RssNewsTools"/> 的新執行個體。
+    /// </summary>
+    /// <param name="logger">記錄器實例。</param>
     public RssNewsTools(ILogger<RssNewsTools> logger)
     {
         _logger = logger;
@@ -23,6 +30,11 @@ public class RssNewsTools : IMcpTool
         _httpClient.DefaultRequestHeaders.Add("User-Agent", "BackgroundAssistant/1.0");
     }
 
+    /// <summary>
+    /// 透過 Google News RSS 來源搜尋最新即時新聞。
+    /// </summary>
+    /// <param name="root">包含 query 關鍵字的 JSON 參數。</param>
+    /// <returns>格式化後的新聞摘要字串。</returns>
     public async Task<string> ExecuteAsync(JsonElement root)
     {
         string query = root.TryGetProperty("query", out var q) ? q.GetString()! : "";

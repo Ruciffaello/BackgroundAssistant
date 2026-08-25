@@ -19,6 +19,7 @@
 
 ### Changed (變更)
 
+* 整理 Markdown 文件結構：根目錄總覽改為標準 `README.md`，並將專案管理、現行設計、研究提案及測試驗收文件分目錄歸檔。
 * Router 收斂為 `conversation`／`tool`；一般對話為預設路徑。
 * Router JSON 新增 `subject`，工具名稱與參數由同一次 LLM 推論直接輸出。
 * 移除第二次 Tool Planner 推論及舊 `answer`、`chat`、`support`、`retrieve`、`clarify` 路由。

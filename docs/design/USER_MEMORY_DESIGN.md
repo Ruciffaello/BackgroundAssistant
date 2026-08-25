@@ -139,4 +139,4 @@ Agent 個性使用 `agent_profile.json`，與使用者資料分開：
 - 相關 Context 加入後仍不超過模型 token 預算。
 - 長期記憶、Profile 與安全政策不被誤稱為已完成。
 
-完整驗收案例見[使用者記憶第一版驗收清單](USER_MEMORY_VERIFICATION.md)。
+完整驗收案例見[使用者記憶第一版驗收清單](../testing/USER_MEMORY_VERIFICATION.md)。

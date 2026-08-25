@@ -25,6 +25,12 @@ public class TextToSpeechWorker : BackgroundService
     private const string TokensPath = "D:/models/sherpa-onnx-vits-zh-ll/tokens.txt";
     private const string DictDirPath = "D:/models/sherpa-onnx-vits-zh-ll/dict";
 
+    /// <summary>
+    /// 初始化 <see cref="TextToSpeechWorker"/> 的新執行個體。
+    /// </summary>
+    /// <param name="logger">記錄器實例。</param>
+    /// <param name="globalState">全域狀態服務。</param>
+    /// <param name="executionResultChannel">待朗讀之執行結果文字通道。</param>
     public TextToSpeechWorker(
         ILogger<TextToSpeechWorker> logger, 
         GlobalStateService globalState,
@@ -35,6 +41,10 @@ public class TextToSpeechWorker : BackgroundService
         _resultReader = executionResultChannel.Reader;
     }
 
+    /// <summary>
+    /// 背景執行迴圈：初始化 VITS TTS 引擎，並監聽 ExecutionResult 佇列進行文字轉語音與播放。
+    /// </summary>
+    /// <param name="stoppingToken">取消語彙基元。</param>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("TTS Worker (Voice) starting...");

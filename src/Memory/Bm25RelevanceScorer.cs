@@ -4,9 +4,9 @@ using System.Text;
 namespace BackgroundAssistant.Memory;
 
 /// <summary>
-/// Small-corpus BM25 scorer for deciding whether recent user turns belong in
-/// the current conversation prompt. Chinese text is represented by character
-/// bigrams; Latin letters and digits are grouped into lowercase words.
+/// 小型語料庫 BM25 相關性評分器。
+/// 用於判斷最近對話回合是否與當前輸入相關，以決定是否注入 Prompt 上下文中。
+/// 中文採用字元 Bigram 分詞，英數字則組成小寫單詞，並自動過濾通用停用詞。
 /// </summary>
 public sealed class Bm25RelevanceScorer
 {
@@ -18,6 +18,12 @@ public sealed class Bm25RelevanceScorer
         "幫我", "我想", "這個", "那個", "的是", "有什"
     };
 
+    /// <summary>
+    /// 計算查詢字串與一組候選文件（歷史對話）之間的 BM25 相關性分數。
+    /// </summary>
+    /// <param name="query">當前使用者的查詢輸入字串。</param>
+    /// <param name="documents">待比對的候選歷史對話文件清單。</param>
+    /// <returns>每個候選文件對應的 BM25 分數清單。</returns>
     public IReadOnlyList<double> Score(string query, IReadOnlyList<string> documents)
     {
         if (documents.Count == 0) return [];
@@ -60,6 +66,11 @@ public sealed class Bm25RelevanceScorer
         return scores;
     }
 
+    /// <summary>
+    /// 將輸入文字標準化並分解為 Token 詞彙集合（中文 Bigram + 英數單詞），並過濾停用詞。
+    /// </summary>
+    /// <param name="text">原始輸入文字。</param>
+    /// <returns>分詞後的 Token 陣列。</returns>
     private static IReadOnlyList<string> Tokenize(string text)
     {
         var tokens = new List<string>();
