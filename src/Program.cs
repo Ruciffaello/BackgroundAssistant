@@ -20,6 +20,7 @@ builder.Services.AddSingleton<GlobalStateService>();
 builder.Services.AddSingleton<AgentMemoryDatabase>();
 builder.Services.AddSingleton<Bm25RelevanceScorer>();
 builder.Services.AddSingleton<RecentConversationService>();
+builder.Services.AddSingleton<IntentRouter>();
 builder.Services.AddSingleton(sp =>
 {
     var configuration = sp.GetRequiredService<IConfiguration>();
@@ -82,6 +83,7 @@ builder.Services.AddSingleton<IMcpTool, RssNewsTools>();
 builder.Services.AddSingleton<IMcpTool, KnowledgeTools>();
 builder.Services.AddSingleton<IMcpTool, HumorTools>();
 builder.Services.AddSingleton<IMcpTool, SystemTools>();
+builder.Services.AddSingleton<ToolExecutionService>();
 
 // 定義 Pipeline Channels
 var rawTextChannel = Channel.CreateUnbounded<string>();

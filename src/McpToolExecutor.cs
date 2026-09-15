@@ -1,182 +1,84 @@
-using System.Threading.Channels;
 using System.Text.Json;
+using System.Threading.Channels;
+using BackgroundAssistant.Memory;
+using BackgroundAssistant.Services;
+using BackgroundAssistant.Tools;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.DependencyInjection;
-using BackgroundAssistant.Tools;
-using BackgroundAssistant.Memory;
-using BackgroundAssistant.PluginRuntime;
-using BackgroundAssistant.Services;
 
 namespace BackgroundAssistant;
 
 /// <summary>
-/// 第四階段：執行 (Executor/Hands) - 工具執行工作者。
-/// 負責解析 JSON 指令並分派給對應的 IMcpTool 實作或 DLL 插件執行，將結果字串寫入 ExecutionResult 通道。
+/// 工具執行工作者：解析 JSON 指令、透過統一工具入口執行，並交接顯示、TTS 與回合保存。
 /// </summary>
-public class McpToolExecutor : BackgroundService
+public sealed class McpToolExecutor : BackgroundService
 {
     private readonly ILogger<McpToolExecutor> _logger;
     private readonly ChannelReader<string> _jsonCommandReader;
     private readonly ChannelWriter<string> _resultWriter;
-    private readonly IEnumerable<IMcpTool> _tools;
     private readonly RecentConversationService _recentConversation;
-    private readonly ToolManifestCatalog _toolManifestCatalog;
-    private readonly LazyDllToolLoader _dllToolLoader;
+    private readonly ToolExecutionService _toolExecutionService;
     private readonly GlobalStateService _globalState;
 
-    /// <summary>
-    /// 初始化 <see cref="McpToolExecutor"/> 的新執行個體。
-    /// </summary>
-    /// <param name="logger">記錄器實例。</param>
-    /// <param name="jsonCommandChannel">JSON 指令通道。</param>
-    /// <param name="executionResultChannel">執行結果文字通道。</param>
-    /// <param name="recentConversation">最近對話服務。</param>
-    /// <param name="toolManifestCatalog">插件資訊清單目錄。</param>
-    /// <param name="dllToolLoader">DLL 工具延遲載入器。</param>
-    /// <param name="globalState">全域狀態服務。</param>
-    /// <param name="tools">內建靜態 IMcpTool 集合。</param>
     public McpToolExecutor(
-        ILogger<McpToolExecutor> logger, 
+        ILogger<McpToolExecutor> logger,
         [FromKeyedServices("JsonCommand")] Channel<string> jsonCommandChannel,
         [FromKeyedServices("ExecutionResult")] Channel<string> executionResultChannel,
         RecentConversationService recentConversation,
-        ToolManifestCatalog toolManifestCatalog,
-        LazyDllToolLoader dllToolLoader,
-        GlobalStateService globalState,
-        IEnumerable<IMcpTool> tools)
+        ToolExecutionService toolExecutionService,
+        GlobalStateService globalState)
     {
         _logger = logger;
         _jsonCommandReader = jsonCommandChannel.Reader;
         _resultWriter = executionResultChannel.Writer;
         _recentConversation = recentConversation;
-        _toolManifestCatalog = toolManifestCatalog;
-        _dllToolLoader = dllToolLoader;
+        _toolExecutionService = toolExecutionService;
         _globalState = globalState;
-        _tools = tools;
     }
 
-    /// <summary>
-    /// 背景執行迴圈：從 JsonCommand 讀取指令，分派至對應工具執行，並將輸出結果送往 TTS 或重設為閒置狀態。
-    /// </summary>
-    /// <param name="stoppingToken">取消語彙基元。</param>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("MCP Tool Executor (Hands) starting with {count} tools loaded...", _tools.Count());
+        _logger.LogInformation(
+            "MCP Tool Executor (Hands) starting with {count} available tools.",
+            _toolExecutionService.ToolCount);
 
         try
         {
-            await foreach (var jsonStr in _jsonCommandReader.ReadAllAsync(stoppingToken))
+            await foreach (string jsonCommand in _jsonCommandReader.ReadAllAsync(stoppingToken))
             {
-                if (jsonStr == "無法執行")
+                ToolExecution execution;
+                if (jsonCommand == "無法執行")
                 {
-                    const string unavailableResponse = "抱歉，我無法理解您的指令。";
-                    await _resultWriter.WriteAsync(unavailableResponse, stoppingToken);
-                    _recentConversation.CompleteTurn(unavailableResponse);
-                    continue;
+                    execution = new ToolExecution(
+                        new BackgroundAssistant.PluginContracts.ToolResult(
+                            false,
+                            "抱歉，我無法理解您的指令。",
+                            "無法理解工具指令。",
+                            "unavailable_command"),
+                        SpeakResult: true);
+                }
+                else
+                {
+                    execution = await ExecuteCommandAsync(jsonCommand, stoppingToken);
                 }
 
-                _logger.LogInformation("Executing MCP Command: {json}", jsonStr);
-                string resultText;
-                string memoryText;
-                bool speakResult = true;
-
-                try
-                {
-                    using var doc = JsonDocument.Parse(jsonStr);
-                    var root = doc.RootElement;
-                    
-                    // 取得 JSON 中的工具名稱
-                    string toolName = root.TryGetProperty("tool", out var t) ? t.GetString()! : "";
-                    
-                    // 從註冊的工具清單中尋找匹配者
-                    var targetTool = _tools.FirstOrDefault(t => t.Name == toolName);
-                    
-                    if (targetTool != null)
-                    {
-                        // 執行具體工具邏輯
-                        resultText = await targetTool.ExecuteAsync(root);
-                        memoryText = resultText;
-                    }
-                    else if (_toolManifestCatalog.TryGetTool(toolName, out var registration))
-                    {
-                        var execution = await _dllToolLoader.ExecuteAsync(
-                            toolName,
-                            root,
-                            stoppingToken);
-                        resultText = execution.Result.Content;
-                        memoryText = execution.Result.MemorySummary ?? resultText;
-                        speakResult = execution.SpeakResult;
-
-                        if (execution.LoadedNewVersion)
-                        {
-                            _logger.LogInformation(
-                                "DLL Tool {tool} version {version} was loaded on demand.",
-                                toolName,
-                                registration.Manifest.Version);
-                        }
-
-                        if (!string.IsNullOrWhiteSpace(execution.ReloadWarning))
-                        {
-                            _logger.LogWarning(
-                                "DLL Tool {tool} reload warning: {warning}",
-                                toolName,
-                                execution.ReloadWarning);
-                        }
-                    }
-                    else
-                    {
-                        resultText = "找不到對應的工具來執行此操作。";
-                        memoryText = resultText;
-                        _logger.LogWarning("Unknown tool requested: {tool}", toolName);
-                    }
-                }
-                catch (PluginLoadException ex)
-                {
-                    _logger.LogError(ex, "DLL Tool loading failed with {code}.", ex.ErrorCode);
-                    resultText = $"工具載入失敗：{ex.Message}";
-                    memoryText = "工具載入失敗。";
-
-                    try
-                    {
-                        using var failedDocument = JsonDocument.Parse(jsonStr);
-                        var failedRoot = failedDocument.RootElement;
-                        var failedToolName = failedRoot.TryGetProperty("tool", out var failedTool)
-                            ? failedTool.GetString() ?? ""
-                            : "";
-                        if (_toolManifestCatalog.TryGetTool(failedToolName, out var failedRegistration))
-                        {
-                            speakResult = failedRegistration.Manifest.SpeakResult;
-                        }
-                    }
-                    catch (JsonException)
-                    {
-                    }
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Tool command failed: {msg}", ex.Message);
-                    resultText = "指令格式錯誤，無法執行。";
-                    memoryText = resultText;
-                }
-
+                string resultText = execution.Result.Content;
+                string memoryText = execution.Result.MemorySummary ?? resultText;
                 Console.WriteLine($"[4. Execution Result]: {resultText}");
-                if (speakResult)
+
+                // 在解除忙碌狀態前完成本回合，避免新輸入搶先覆蓋暫存的使用者文字。
+                _recentConversation.CompleteTurn(memoryText);
+
+                if (execution.SpeakResult)
                 {
                     await _resultWriter.WriteAsync(resultText, stoppingToken);
                 }
                 else
                 {
                     _globalState.SetIdle();
-                    _logger.LogInformation(
-                        "Tool result was displayed without TTS. System is now IDLE.");
+                    _logger.LogInformation("Tool result was displayed without TTS. System is now IDLE.");
                 }
-
-                _recentConversation.CompleteTurn(memoryText);
             }
         }
         catch (OperationCanceledException)
@@ -186,6 +88,36 @@ public class McpToolExecutor : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error in MCP Tool Executor");
+        }
+    }
+
+    private async Task<ToolExecution> ExecuteCommandAsync(string jsonCommand, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(jsonCommand);
+            JsonElement root = document.RootElement;
+            string toolName = root.TryGetProperty("tool", out JsonElement tool)
+                ? tool.GetString() ?? ""
+                : "";
+
+            _logger.LogInformation("Executing tool command: {json}", jsonCommand);
+            return await _toolExecutionService.ExecuteAsync(toolName, root, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Tool command failed: {message}", ex.Message);
+            return new ToolExecution(
+                new BackgroundAssistant.PluginContracts.ToolResult(
+                    false,
+                    "指令格式錯誤，無法執行。",
+                    "指令格式錯誤。",
+                    "invalid_command"),
+                SpeakResult: true);
         }
     }
 }

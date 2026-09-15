@@ -1,13 +1,10 @@
-using System.Text.Json;
 using System.Threading.Channels;
 using System.Globalization;
 using BackgroundAssistant.Services;
-using BackgroundAssistant.Tools;
 using BackgroundAssistant.Memory;
-using BackgroundAssistant.PluginRuntime;
+using BackgroundAssistant.Prompting;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.ML.OnnxRuntimeGenAI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -19,18 +16,14 @@ namespace BackgroundAssistant;
 /// </summary>
 public class IntentParserWorker : BackgroundService
 {
-    private const int RouterOutputTokens = 96;
     private const int AnswerOutputTokens = 300;
     private const int TokenSafetyMargin = 16;
-    private const string MinimalRouterTemplate =
-        "<|system|>\n{SystemPrompt}<|end|>\n<|user|>{InputText}<|end|>\n<|assistant|>";
 
     private readonly ILogger<IntentParserWorker> _logger;
     private readonly IConfiguration _configuration;
     private readonly IPhi35ModelService _modelService;
+    private readonly IntentRouter _intentRouter;
     private readonly PinyinCorrectionService _pinyinService;
-    private readonly HashSet<string> _availableToolNames;
-    private readonly string _externalToolCatalog;
     private readonly ChannelReader<string> _cleanTextReader;
     private readonly ChannelWriter<string> _jsonCommandWriter;
     private readonly ChannelWriter<string> _answerWriter;
@@ -44,10 +37,9 @@ public class IntentParserWorker : BackgroundService
     /// <param name="logger">記錄器實例。</param>
     /// <param name="configuration">應用程式組態。</param>
     /// <param name="modelService">共享的 Phi-3.5 模型服務。</param>
+    /// <param name="intentRouter">單次對話／工具路由器。</param>
     /// <param name="pinyinService">拼音校正服務。</param>
     /// <param name="recentConversation">最近對話服務。</param>
-    /// <param name="tools">內建靜態 IMcpTool 集合。</param>
-    /// <param name="toolManifestCatalog">插件目錄管理員。</param>
     /// <param name="cleanTextChannel">CleanText 核心文字通道。</param>
     /// <param name="jsonCommandChannel">JsonCommand 工具指令通道。</param>
     /// <param name="executionResultChannel">ExecutionResult 執行與對話回應通道。</param>
@@ -55,10 +47,9 @@ public class IntentParserWorker : BackgroundService
         ILogger<IntentParserWorker> logger,
         IConfiguration configuration,
         IPhi35ModelService modelService,
+        IntentRouter intentRouter,
         PinyinCorrectionService pinyinService,
         RecentConversationService recentConversation,
-        IEnumerable<IMcpTool> tools,
-        ToolManifestCatalog toolManifestCatalog,
         [FromKeyedServices("CleanText")] Channel<string> cleanTextChannel,
         [FromKeyedServices("JsonCommand")] Channel<string> jsonCommandChannel,
         [FromKeyedServices("ExecutionResult")] Channel<string> executionResultChannel)
@@ -66,11 +57,9 @@ public class IntentParserWorker : BackgroundService
         _logger = logger;
         _configuration = configuration;
         _modelService = modelService;
+        _intentRouter = intentRouter;
         _pinyinService = pinyinService;
         _recentConversation = recentConversation;
-        _availableToolNames = tools.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
-        _availableToolNames.UnionWith(toolManifestCatalog.Tools.Select(tool => tool.Manifest.Id));
-        _externalToolCatalog = toolManifestCatalog.BuildRouterCatalog();
         _cleanTextReader = cleanTextChannel.Reader;
         _jsonCommandWriter = jsonCommandChannel.Writer;
         _answerWriter = executionResultChannel.Writer;
@@ -100,10 +89,10 @@ public class IntentParserWorker : BackgroundService
                 if (string.IsNullOrWhiteSpace(text)) continue;
                 try
                 {
-                    string contextualInput = AddRecentContext(text, _recentConversation.BuildPromptContext(text));
+                    string recentContext = _recentConversation.BuildPromptContext(text);
                     _recentConversation.BeginTurn(text);
 
-                    RouterDecision decision = await DecideAsync(text, stoppingToken);
+                    RouterDecision decision = await _intentRouter.DecideAsync(text, stoppingToken);
                     _logger.LogInformation(
                         "Router decision for '{text}': {mode}, subject: {subject}",
                         text,
@@ -113,7 +102,7 @@ public class IntentParserWorker : BackgroundService
                     switch (decision.Mode)
                     {
                         case "conversation":
-                            await WriteResponseAsync(contextualInput, "ChatAnswer", "Chat", stoppingToken);
+                            await WriteResponseAsync(text, recentContext, "ChatAnswer", "Chat", stoppingToken);
                             break;
 
                         case "tool":
@@ -122,13 +111,23 @@ public class IntentParserWorker : BackgroundService
 
                         default:
                             _logger.LogWarning("Unknown router mode: {mode}; falling back to conversation.", decision.Mode);
-                            await WriteResponseAsync(contextualInput, "ChatAnswer", "Chat", stoppingToken);
+                            await WriteResponseAsync(text, recentContext, "ChatAnswer", "Chat", stoppingToken);
                             break;
                     }
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
                     throw;
+                }
+                catch (PromptInputTooLongException ex)
+                {
+                    _logger.LogWarning(ex, "Current input does not fit the configured model context budget.");
+                    await WriteFinalTextAsync("這段訊息太長，請拆成較短的內容再試一次。", stoppingToken);
+                }
+                catch (PromptTemplateTooLongException ex)
+                {
+                    _logger.LogError(ex, "Configured prompt template does not fit the model context budget.");
+                    await WriteFinalTextAsync("系統提示設定超過模型可處理的長度，請調整設定後再試一次。", stoppingToken);
                 }
                 catch (Exception ex)
                 {
@@ -148,96 +147,36 @@ public class IntentParserWorker : BackgroundService
     }
 
     /// <summary>
-    /// 調用 LLM 路由器進行意圖分析，判斷為一般對話或是特定工具調用。
-    /// </summary>
-    /// <param name="text">使用者輸入文字。</param>
-    /// <param name="ct">取消語彙基元。</param>
-    /// <returns>路由器決策結果 <see cref="RouterDecision"/>。</returns>
-    private async Task<RouterDecision> DecideAsync(string text, CancellationToken ct)
-    {
-        string systemPrompt = _configuration["PromptSettings:DecisionRouter:SystemPrompt"] ?? "";
-        if (!string.IsNullOrWhiteSpace(_externalToolCatalog))
-        {
-            systemPrompt = $"{systemPrompt}\n{_externalToolCatalog}";
-        }
-        string userTemplate = _configuration["PromptSettings:DecisionRouter:UserTemplate"] ?? "";
-        string prompt;
-        try
-        {
-            prompt = BuildPromptWithinBudget(systemPrompt, userTemplate, text, RouterOutputTokens);
-        }
-        catch (InvalidOperationException ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Router few-shot template exceeded the token budget; using the minimal template.");
-            prompt = BuildPromptWithinBudget(
-                systemPrompt,
-                MinimalRouterTemplate,
-                text,
-                RouterOutputTokens);
-        }
-        string response = await RunInferenceAsync(prompt, RouterOutputTokens, ct);
-
-        Console.WriteLine($"\n[3. Decision Router]:\n{response.Trim()}");
-
-        if (!TryExtractJson(response, out JsonDocument document))
-        {
-            _logger.LogWarning("Router returned invalid JSON: {response}", response);
-            return RouterDecision.Conversation();
-        }
-
-        using (document)
-        {
-            JsonElement root = document.RootElement;
-            string mode = root.TryGetProperty("mode", out JsonElement modeElement)
-                ? modeElement.GetString()?.Trim().ToLowerInvariant() ?? ""
-                : "";
-            string subject = root.TryGetProperty("subject", out JsonElement subjectElement)
-                ? subjectElement.GetString()?.Trim() ?? "unknown"
-                : "unknown";
-            string? tool = root.TryGetProperty("tool", out JsonElement toolElement)
-                ? toolElement.GetString()?.Trim()
-                : null;
-
-            if (mode != "tool")
-            {
-                return new RouterDecision("conversation", subject, null, null);
-            }
-
-            if (string.IsNullOrWhiteSpace(tool) || !_availableToolNames.Contains(tool))
-            {
-                _logger.LogWarning(
-                    "Router selected an unavailable or missing tool: {tool}; falling back to conversation.",
-                    tool);
-                return RouterDecision.Conversation(subject);
-            }
-
-            return new RouterDecision("tool", subject, tool, root.GetRawText());
-        }
-    }
-
-    /// <summary>
     /// 調用 LLM 生成一般聊天回覆並輸出至回應通道。
     /// </summary>
-    /// <param name="text">包含上下文的使用者輸入。</param>
+    /// <param name="currentInput">目前使用者輸入。</param>
+    /// <param name="recentContext">已篩選的相關歷史上下文。</param>
     /// <param name="promptSection">組態中的 Prompt 設定區段名稱。</param>
     /// <param name="outputLabel">Console 輸出的標籤名稱。</param>
     /// <param name="ct">取消語彙基元。</param>
     private async Task WriteResponseAsync(
-        string text,
+        string currentInput,
+        string recentContext,
         string promptSection,
         string outputLabel,
         CancellationToken ct)
     {
         string systemPrompt = _configuration[$"PromptSettings:{promptSection}:SystemPrompt"] ?? "";
         string userTemplate = _configuration[$"PromptSettings:{promptSection}:UserTemplate"] ?? "";
-        string prompt = BuildPromptWithinBudget(systemPrompt, userTemplate, text, AnswerOutputTokens);
-        string answer = CleanModelText(await RunInferenceAsync(
-            prompt,
-            AnswerOutputTokens,
-            ct,
-            _answerRepetitionPenalty));
+        string prompt = BuildPromptWithinBudget(
+            systemPrompt,
+            userTemplate,
+            currentInput,
+            recentContext,
+            AnswerOutputTokens);
+        string answer = CleanModelText((await _modelService.GenerateAsync(
+            new Phi35GenerationRequest(
+                prompt,
+                _contextLimit,
+                AnswerOutputTokens,
+                RepetitionPenalty: _answerRepetitionPenalty,
+                DetectRepeatedSuffix: true),
+            ct)).Text);
 
         if (string.IsNullOrWhiteSpace(answer))
         {
@@ -256,8 +195,7 @@ public class IntentParserWorker : BackgroundService
     private async Task DispatchToolAsync(RouterDecision decision, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(decision.CommandJson) ||
-            string.IsNullOrWhiteSpace(decision.Tool) ||
-            !_availableToolNames.Contains(decision.Tool))
+            string.IsNullOrWhiteSpace(decision.Tool))
         {
             _logger.LogWarning("Router produced an invalid tool command.");
             await WriteFinalTextAsync("目前無法建立有效的工具指令。", ct);
@@ -281,167 +219,44 @@ public class IntentParserWorker : BackgroundService
     }
 
     /// <summary>
-    /// 將歷史對話上下文與當前輸入合併為完整 Prompt 輸入文字。
-    /// </summary>
-    /// <param name="currentInput">當前輸入。</param>
-    /// <param name="recentContext">歷史對話上下文。</param>
-    /// <returns>合併後的輸入字串。</returns>
-    private static string AddRecentContext(string currentInput, string recentContext)
-    {
-        return string.IsNullOrWhiteSpace(recentContext)
-            ? currentInput
-            : $"以下是先前對話，只用來理解上下文：\n{recentContext}\n\n目前使用者輸入（請以這句為主）：\n{currentInput}";
-    }
-
-    /// <summary>
-    /// 在 Token 預算限制內動態構建 Prompt，必要時自動縮減使用者輸入長度以防超出 Context Window。
+    /// 在 Token 預算限制內建立 Prompt。歷史上下文超限時會略過，保留目前使用者輸入。
     /// </summary>
     /// <param name="systemPrompt">系統提示詞。</param>
     /// <param name="userTemplate">使用者樣板。</param>
-    /// <param name="inputText">輸入文字內容。</param>
+    /// <param name="currentInput">目前使用者輸入。</param>
+    /// <param name="recentContext">已篩選的相關歷史上下文。</param>
     /// <param name="reservedOutputTokens">預留給輸出的 Token 數量。</param>
     /// <returns>編碼合規的 Prompt 字串。</returns>
     private string BuildPromptWithinBudget(
         string systemPrompt,
         string userTemplate,
-        string inputText,
+        string currentInput,
+        string? recentContext,
         int reservedOutputTokens)
     {
-        int maxInputTokens = _contextLimit - reservedOutputTokens - TokenSafetyMargin;
-        string candidateInput = inputText.Trim();
+        PromptBudgetResult result = PromptBudgetBuilder.Build(
+            systemPrompt,
+            userTemplate,
+            currentInput,
+            recentContext,
+            _contextLimit,
+            reservedOutputTokens,
+            TokenSafetyMargin,
+            CountTokens);
 
-        while (true)
+        if (result.RecentContextOmitted)
         {
-            string prompt = userTemplate
-                .Replace("{SystemPrompt}", systemPrompt)
-                .Replace("{InputText}", candidateInput);
-
-            using var sequences = _modelService.Tokenizer.Encode(prompt);
-            if (sequences[0].Length <= maxInputTokens)
-            {
-                if (candidateInput.Length < inputText.Trim().Length)
-                {
-                    _logger.LogWarning(
-                        "Input was shortened to fit the {limit}-token context budget.",
-                        _contextLimit);
-                }
-
-                return prompt;
-            }
-
-            if (candidateInput.Length <= 16)
-            {
-                throw new InvalidOperationException(
-                    $"Prompt template exceeds the {_contextLimit}-token context budget.");
-            }
-
-            candidateInput = candidateInput[..Math.Max(16, candidateInput.Length * 3 / 4)].TrimEnd();
+            _logger.LogWarning(
+                "Recent context was omitted to keep the current input within the {limit}-token context budget.",
+                _contextLimit);
         }
+
+        return result.Prompt;
     }
 
-    /// <summary>
-    /// 執行 ONNX GenAI 模型推論，支援 Repetition Penalty、動態長度截斷與結束符號偵測。
-    /// </summary>
-    /// <param name="prompt">完整的輸入 Prompt。</param>
-    /// <param name="reservedOutputTokens">最多生成的 Output Token 數。</param>
-    /// <param name="ct">取消語彙基元。</param>
-    /// <param name="repetitionPenalty">重複懲罰係數。</param>
-    /// <returns>模型生成的文字內容。</returns>
-    private async Task<string> RunInferenceAsync(
-        string prompt,
-        int reservedOutputTokens,
-        CancellationToken ct,
-        double repetitionPenalty = 1d)
+    private int CountTokens(string text)
     {
-        bool lockTaken = false;
-        try
-        {
-            await _modelService.Lock.WaitAsync(ct);
-            lockTaken = true;
-
-            using var generatorParams = new GeneratorParams(_modelService.Model);
-            using var sequences = _modelService.Tokenizer.Encode(prompt);
-            int inputTokens = sequences[0].Length;
-            int maxLength = Math.Min(inputTokens + reservedOutputTokens, _contextLimit);
-
-            generatorParams.SetSearchOption("max_length", maxLength);
-            generatorParams.SetSearchOption("do_sample", false);
-            generatorParams.SetSearchOption("repetition_penalty", repetitionPenalty);
-            generatorParams.SetSearchOption("past_present_share_buffer", true);
-
-            using var generator = new Generator(_modelService.Model, generatorParams);
-            generator.AppendTokenSequences(sequences);
-            using var tokenizerStream = _modelService.Tokenizer.CreateStream();
-
-            string result = "";
-            while (!generator.IsDone() && !ct.IsCancellationRequested)
-            {
-                generator.GenerateNextToken();
-                int lastTokenId = generator.GetSequence(0)[^1];
-                string part = tokenizerStream.Decode(lastTokenId);
-
-                if (!string.IsNullOrEmpty(part))
-                {
-                    result += part;
-                    if (repetitionPenalty > 1d && TryTrimRepeatedSuffix(result, out string trimmedResult))
-                    {
-                        _logger.LogWarning("Answer generation stopped after detecting a repeated suffix.");
-                        return trimmedResult;
-                    }
-                    int endIndex = result.IndexOf("[END]", StringComparison.Ordinal);
-                    if (endIndex >= 0)
-                    {
-                        return result[..endIndex];
-                    }
-                }
-            }
-
-            return result;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogError(ex, "Inference sub-call failed.");
-            return "";
-        }
-        finally
-        {
-            if (lockTaken)
-            {
-                _modelService.Lock.Release();
-            }
-        }
-    }
-
-    /// <summary>
-    /// 嘗試從模型輸出字串中提取合法的 JSON 物件。
-    /// </summary>
-    /// <param name="text">模型輸出字串。</param>
-    /// <param name="document">解析成功的 JsonDocument。</param>
-    /// <returns>若成功解析出 JSON 物件則回傳 true，否則為 false。</returns>
-    private static bool TryExtractJson(string text, out JsonDocument document)
-    {
-        document = null!;
-        int start = text.IndexOf('{');
-        int end = text.LastIndexOf('}');
-        if (start < 0 || end <= start) return false;
-
-        try
-        {
-            document = JsonDocument.Parse(text[start..(end + 1)]);
-            if (document.RootElement.ValueKind == JsonValueKind.Object)
-            {
-                return true;
-            }
-
-            document.Dispose();
-            document = null!;
-            return false;
-        }
-        catch (JsonException)
-        {
-            document = null!;
-            return false;
-        }
+        return _modelService.CountTokens(text);
     }
 
     /// <summary>
@@ -458,57 +273,4 @@ public class IntentParserWorker : BackgroundService
             .Trim();
     }
 
-    /// <summary>
-    /// 偵測並修剪模型生成過程中的重複後綴跳針字句。
-    /// </summary>
-    /// <param name="text">當前生成的文字。</param>
-    /// <param name="trimmed">修剪後的文字。</param>
-    /// <returns>若偵測到重複跳針並完成修剪則回傳 true，否則為 false。</returns>
-    private static bool TryTrimRepeatedSuffix(string text, out string trimmed)
-    {
-        const int repetitions = 4;
-        trimmed = text;
-        if (text.Length < 24) return false;
-
-        for (int phraseLength = 2; phraseLength <= 24; phraseLength++)
-        {
-            int repeatedLength = phraseLength * repetitions;
-            if (repeatedLength > text.Length) break;
-
-            string phrase = text[^phraseLength..];
-            bool repeated = true;
-            for (int index = 2; index <= repetitions; index++)
-            {
-                int start = text.Length - phraseLength * index;
-                if (!text.AsSpan(start, phraseLength).SequenceEqual(phrase))
-                {
-                    repeated = false;
-                    break;
-                }
-            }
-
-            if (!repeated) continue;
-            trimmed = text[..(text.Length - repeatedLength + phraseLength)].TrimEnd();
-            return true;
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// 路由器決策記錄。
-    /// </summary>
-    /// <param name="Mode">決策模式（"conversation" 或 "tool"）。</param>
-    /// <param name="Subject">主題摘要。</param>
-    /// <param name="Tool">若為工具模式，代表工具名稱。</param>
-    /// <param name="CommandJson">若為工具模式，代表工具執行的完整 JSON 字串。</param>
-    private sealed record RouterDecision(
-        string Mode,
-        string Subject,
-        string? Tool,
-        string? CommandJson)
-    {
-        public static RouterDecision Conversation(string subject = "unknown") =>
-            new("conversation", subject, null, null);
-    }
 }

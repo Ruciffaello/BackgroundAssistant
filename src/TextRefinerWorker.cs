@@ -1,7 +1,6 @@
 using System.Threading.Channels;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.ML.OnnxRuntimeGenAI;
 
 namespace BackgroundAssistant;
 
@@ -59,9 +58,6 @@ public class TextRefinerWorker : BackgroundService
                 string refinedText = "";
                 try
                 {
-                    // 獲取模型排隊鎖，避免多個工作者同時爭搶推論資源
-                    await _modelService.Lock.WaitAsync(stoppingToken);
-
                     // 從設定檔讀取提示詞
                     string sysPrompt = _configuration["PromptSettings:TextRefiner:SystemPrompt"] ?? "";
                     string userTemplate = _configuration["PromptSettings:TextRefiner:UserTemplate"] ?? "";
@@ -70,36 +66,14 @@ public class TextRefinerWorker : BackgroundService
                         .Replace("{SystemPrompt}", sysPrompt)
                         .Replace("{InputText}", rawText);
 
-                    using var generatorParams = new GeneratorParams(_modelService.Model);
-                    using var sequences = _modelService.Tokenizer.Encode(prompt);
-                    
-                    // 動態計算最大長度：輸入 Token 數 + 32 (精煉輸出不會超過原句)，上限 512
-                    int inputTokens = sequences[0].Length;
-                    int dynamicMaxLength = Math.Clamp(inputTokens + 32, 64, 512);
-
-                    // 設定推論參數 (Greedy Search 以獲得穩定的結果)
-                    generatorParams.SetSearchOption("max_length", dynamicMaxLength);
-                    generatorParams.SetSearchOption("do_sample", false);
-                    generatorParams.SetSearchOption("past_present_share_buffer", true);
-
-                    using var generator = new Generator(_modelService.Model, generatorParams);
-                    generator.AppendTokenSequences(sequences);
-                    
-                    using var tokenizerStream = _modelService.Tokenizer.CreateStream();
-                    
-                    while (!generator.IsDone())
-                    {
-                        generator.GenerateNextToken();
-                        var lastTokenId = generator.GetSequence(0)[^1];
-                        var part = tokenizerStream.Decode(lastTokenId);
-                        
-                        if (!string.IsNullOrEmpty(part))
-                        {
-                            // 偵測到結束標籤即停止，避免 AI 產生幻覺
-                            if (part.Contains("[END]")) break;
-                            refinedText += part;
-                        }
-                    }
+                    Phi35GenerationResult generation = await _modelService.GenerateAsync(
+                        new Phi35GenerationRequest(
+                            prompt,
+                            ContextLimit: 512,
+                            MaxOutputTokens: 32,
+                            MinimumTotalTokens: 64),
+                        stoppingToken);
+                    refinedText = generation.Text;
                     
                     // 使用正則表達式精準抓取 [CLEAN] 與 [END] 之間的內容
                     var match = System.Text.RegularExpressions.Regex.Match(refinedText, @"\[CLEAN\](.*?)\[END\]", System.Text.RegularExpressions.RegexOptions.Singleline);
@@ -118,11 +92,6 @@ public class TextRefinerWorker : BackgroundService
                     _logger.LogError(ex, "Refinement failed for text: {text}", rawText);
                     refinedText = rawText; // 失敗時退回原始文字
                 }
-                finally
-                {
-                    _modelService.Lock.Release();
-                }
-
                 // 再次確保只取第一行，防止模型幻覺出的解釋文字
                 refinedText = refinedText.Split('\n')[0].Trim();
                 if (string.IsNullOrWhiteSpace(refinedText)) refinedText = rawText;

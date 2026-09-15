@@ -16,6 +16,7 @@
     <Compile Remove="src\PluginRuntime\**\*.cs" />
     <Compile Remove="src\Plugins\**\*.cs" />
     <Compile Remove="tests\FileSearchTool.Tests\**\*.cs" />
+    <Compile Remove="tests\PromptBudget.Tests\**\*.cs" />
   </ItemGroup>
 
   <ItemGroup>

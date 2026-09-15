@@ -13,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BackgroundAssistant.FileSea
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BackgroundAssistant.FileSearchTool.Tests", "tests\FileSearchTool.Tests\BackgroundAssistant.FileSearchTool.Tests.csproj", "{F99C42A8-CF7C-42F9-920E-D46B5C8732A9}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BackgroundAssistant.PromptBudget.Tests", "tests\PromptBudget.Tests\BackgroundAssistant.PromptBudget.Tests.csproj", "{DDCECC8E-A40D-458D-93F2-CDE00D3BC803}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -39,6 +41,10 @@ Global
 		{F99C42A8-CF7C-42F9-920E-D46B5C8732A9}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F99C42A8-CF7C-42F9-920E-D46B5C8732A9}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F99C42A8-CF7C-42F9-920E-D46B5C8732A9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DDCECC8E-A40D-458D-93F2-CDE00D3BC803}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DDCECC8E-A40D-458D-93F2-CDE00D3BC803}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DDCECC8E-A40D-458D-93F2-CDE00D3BC803}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DDCECC8E-A40D-458D-93F2-CDE00D3BC803}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
